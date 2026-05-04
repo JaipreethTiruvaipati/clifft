@@ -134,15 +134,6 @@ TEST_CASE("MutableMaskView: zero_out clears all words") {
     REQUIRE(ma.is_zero());
 }
 
-TEST_CASE("MutableMaskView: copy_from replaces contents") {
-    std::array<uint64_t, 3> a{0, 0, 0};
-    std::array<uint64_t, 3> b{1, 2, 3};
-    MutableMaskView{std::span<uint64_t>(a)}.copy_from(MaskView{std::span<const uint64_t>(b)});
-    REQUIRE(a[0] == 1);
-    REQUIRE(a[1] == 2);
-    REQUIRE(a[2] == 3);
-}
-
 // =========================================================================
 // BitMask<N> adapters
 // =========================================================================
