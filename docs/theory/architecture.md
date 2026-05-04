@@ -38,7 +38,7 @@ The fixed instruction size ensures L1 cache alignment and predictable memory acc
 
 The VM allocates a single contiguous complex array of size $2^{k_{\text{max}}}$ at program start. This array is never resized during execution. When measurements reduce the active set, the array is logically compacted (the compiler emits SWAP instructions to route measured qubits to the top axis before measurement).
 
-The Pauli frame ($P$) is tracked as a pair of $n$-bit masks using the custom, auto-vectorized `clifft::BitMask<kMaxInlineQubits>`, supporting arbitrary scaling natively without heap allocations.
+The Pauli frame ($P$) is tracked as a pair of $n$-bit masks held in 64-bit-word arrays sized to $\lceil n/64 \rceil$ words at state construction. Single-bit reads and writes at known indices compile to a single shifted load or AND/OR; bulk operations iterate the word array.
 
 ## Python Bindings
 

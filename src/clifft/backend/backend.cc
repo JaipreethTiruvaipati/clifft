@@ -420,10 +420,6 @@ LocalizationResult localize_pauli(CompilerContext& ctx,
     const uint32_t n = ctx.reg_manager.num_qubits();
     const uint32_t words = (n + 63) / 64;
 
-    // Runtime-width scratch storage. PauliBitMask (BitMask<128>) would
-    // truncate the input for circuits with n > kMaxInlineQubits, hiding
-    // bits in qubits 128+ and producing a spuriously-empty Pauli that
-    // tripped the identity-Pauli assertion below.
     std::vector<uint64_t> x_bits(words, 0);
     std::vector<uint64_t> z_bits(words, 0);
     MutableMaskView x_view{std::span<uint64_t>(x_bits)};
@@ -531,21 +527,9 @@ CompiledModule lower(const HirModule& hir, std::span<const uint8_t> postselectio
     using internal::LocalizedBasis;
 
     const uint32_t n = hir.num_qubits;
-    // Two ceilings:
-    //   - kMaxInlineQubits: SVM frame storage (state.p_x / p_z) is still a
-    //     fixed-width BitMask<kMaxInlineQubits>, so any conditional Pauli
-    //     or noise channel touching higher qubits would be silently dropped
-    //     at execution time. Lifting this requires runtime-width SVM frame
-    //     storage (planned for the next migration PR).
-    //   - 65536: bytecode axis operands are uint16_t. trace() enforces
-    //     this; lower() repeats the check defensively.
-    if (n > kMaxInlineQubits) {
-        throw std::runtime_error(
-            "Circuit num_qubits (" + std::to_string(n) + ") exceeds the SVM frame width (" +
-            std::to_string(kMaxInlineQubits) +
-            "). The HIR supports wider circuits but the runtime frame does not yet; "
-            "lifting this gate is the subject of a follow-up migration PR.");
-    }
+    // Bytecode axis operands are uint16_t, so circuits above 65536 qubits
+    // cannot be lowered. trace() enforces this; lower() repeats the check
+    // defensively.
     if (n > 65536) {
         throw std::runtime_error("Circuit exceeds 65536-qubit VM axis limit: " + std::to_string(n) +
                                  " qubits");
@@ -651,10 +635,8 @@ CompiledModule lower(const HirModule& hir, std::span<const uint8_t> postselectio
                 auto p_v =
                     map_to_virtual(ctx, hir.destab_mask(op), hir.stab_mask(op), hir.sign(op), n);
 
-                // Identity Pauli check: walk the full mapped width directly,
-                // not through a fixed-width PauliBitMask intermediate (which
-                // would silently treat any high-qubit-only support as zero
-                // and emit a deterministic measurement).
+                // Identity check: any nonzero word in either x or z makes
+                // the Pauli non-identity. Word count is (n + 63) / 64.
                 const uint32_t pv_words = (n + 63) / 64;
                 bool is_identity = true;
                 for (uint32_t w = 0; w < pv_words; ++w) {
@@ -863,11 +845,13 @@ CompiledModule lower(const HirModule& hir, std::span<const uint8_t> postselectio
 
     ctx.constant_pool.global_weight *= hir.global_weight;
 
-    uint16_t peak = ctx.reg_manager.peak_k();
-    if (peak >= 63) {
-        throw std::runtime_error("peak active rank (" + std::to_string(peak) +
-                                 ") >= 63: would cause undefined behavior in SVM 1ULL << k shifts");
-    }
+    // Keep peak as uint32_t through the validate-and-store path. A
+    // uint16_t narrowing here would wrap peak == 65536 (a circuit
+    // activating every VM axis) to 0, slip past validate_peak_rank,
+    // and ship a CompiledModule whose peak_rank under-allocates the
+    // SVM amplitude array.
+    uint32_t peak = ctx.reg_manager.peak_k();
+    internal::validate_peak_rank(peak);
 
     CompiledModule result;
     result.bytecode = std::move(ctx.bytecode);

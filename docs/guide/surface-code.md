@@ -237,9 +237,3 @@ Representative timing on an x86-64 Linux system (20,000 shots):
 | **Sample** | ~20 ms | ~5 ms | ~120 ms | ~20 ms |
 
 Both Clifft and Stim have a similar compilation phase that resolves deterministic Clifford impacts ahead of time. The sampling speed difference comes down to vectorization: because Stim is Clifford-only, it never needs an active state vector array, so it can pack the Pauli frame and measurement sampling into wide SIMD operations — processing hundreds of shots per instruction. The key takeaway is that Clifft produces **correct results** — the logical error rates agree — while offering a compilation pipeline that generalizes beyond stabilizer circuits.
-
-!!! note "Current qubit limit"
-    Clifft's default build supports up to 128 qubits, which accommodates distances
-    3 (26 qubit indices), 5 (64 qubit indices), and 7 (118 qubit indices).
-    For larger circuits, rebuild with `CLIFFT_MAX_QUBITS=256` or higher.
-    See [Building from Source](../development/building.md#clifft_max_qubits) for details.

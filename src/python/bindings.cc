@@ -57,10 +57,6 @@ NB_MODULE(_clifft_core, m) {
     m.def("version", []() { return clifft::kVersion; }, "Return the Clifft version string");
 
     m.def(
-        "max_sim_qubits", []() { return clifft::kMaxInlineQubits; },
-        "Return the maximum number of qubits supported by the simulator");
-
-    m.def(
         "svm_backend", []() { return clifft::svm_backend(); },
         "Return the active SVM dispatch backend: 'avx512', 'avx2', or 'scalar'.\n\n"
         "Reflects the resolved runtime kernel path or CLIFFT_FORCE_ISA environment override. "

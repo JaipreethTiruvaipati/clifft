@@ -11,7 +11,6 @@
 // HeisenbergOp by an opaque PauliMaskHandle. Variable-sized payloads (noise
 // channels, detector/observable target lists) live in side-tables on HirModule.
 
-#include "clifft/util/bitmask.h"
 #include "clifft/util/config.h"
 #include "clifft/util/mask_view.h"
 #include "clifft/util/pauli_arena.h"
@@ -55,12 +54,6 @@ enum class ObservableIdx : uint32_t {};
 
 /// Index into the expectation value record (absolute position)
 enum class ExpValIdx : uint32_t {};
-
-// Fixed-width Pauli mask, sized to kMaxInlineQubits. Retained because the
-// SchrodingerState VM frame still uses it for state.p_x / state.p_z; that
-// migration is the next PR (#45 PR3) at which point this typedef and its
-// supporting BitMask machinery can go away.
-using PauliBitMask = BitMask<kMaxInlineQubits>;
 
 // =============================================================================
 // Noise Channel Structures
@@ -123,8 +116,7 @@ inline constexpr PauliMaskHandle kNoMask = static_cast<PauliMaskHandle>(~uint32_
 //
 // Construct via HirModule::append_* builders. For mask-carrying ops, the
 // builders take a fill callable that writes (X, Z, sign) into a freshly
-// claimed arena slot -- the frontend uses this to populate masks directly
-// from stim rows without a fixed-width PauliBitMask intermediate.
+// claimed arena slot.
 struct HeisenbergOp {
     static constexpr uint8_t FLAG_IS_DAGGER = 1 << 0;
     static constexpr uint8_t FLAG_HIDDEN = 1 << 2;
@@ -389,10 +381,7 @@ struct HirModule {
     //
     // The mask slot is claimed, the fill callable is invoked with a
     // MutablePauliMaskView pointing at the freshly claimed (zeroed) slot,
-    // and the op is appended -- atomically at the call site. The Front-End
-    // uses this to write rewound-Pauli data straight from a stim::PauliString
-    // into the arena, avoiding any fixed-width PauliBitMask intermediate
-    // that would silently truncate qubits beyond kMaxInlineQubits. Example:
+    // and the op is appended -- atomically at the call site. Example:
     //
     //     hir.append_tgate(/*dagger=*/false, [&](MutablePauliMaskView slot) {
     //         stim_to_mask_view(rewound.xs, n, slot.x());

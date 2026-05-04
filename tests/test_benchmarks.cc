@@ -156,6 +156,21 @@ TEST_CASE("Bench: surface d5 r5 high-noise APPLY_PAULI heavy", "[bench]") {
 }
 
 // ---------------------------------------------------------------------------
+// Surface code d=11 r=11 p=1e-3: ~242 qubits, two 64-bit Pauli mask
+// words. Sits above the single-word frame regime to give a regression
+// baseline for the runtime-width path.
+// ---------------------------------------------------------------------------
+TEST_CASE("Bench: surface d11 r11 p1e-3 sampling 1000 shots", "[bench]") {
+    auto mod = compile_text(surface_code_text(11, 11, 1e-3));
+    REQUIRE(mod.peak_rank == 0);
+    REQUIRE(mod.num_qubits > 128);
+
+    BENCHMARK("surface-d11-r11 p=1e-3 x1000 shots") {
+        return sample(mod, 1000, 0);
+    };
+}
+
+// ---------------------------------------------------------------------------
 // EXP_VAL heavy: 20 qubits, 200 weight-3 multi-Pauli probes per shot.
 // Exercises exec_exp_val (frame conjugation + dormant/active split). Each
 // probe walks the full mask twice (popcount of x & p_z, z & p_x).
