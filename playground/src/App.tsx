@@ -164,15 +164,55 @@ export default function App() {
   // Ref to avoid stale closures in editor cursor handlers
   const compileResultRef = useRef<CompileResult | null>(null);
 
+  // Reverse source-map indices, built once per compile result. Each
+  // forward source map is `outIdx -> source_line[]`; the cursor highlight
+  // wants the inverse `source_line -> outIdx[]` so it can answer "which
+  // HIR/bytecode lines correspond to this source line" in O(1) instead
+  // of scanning every output line on every click. firstBc is the first
+  // bytecode index for a given source line, used by the k-history chart.
+  //
+  // A single forward entry can contain the same source line more than
+  // once when an upstream pass merged provenance from fused / unrolled
+  // ops (e.g. REPEAT-block expansion). Dedupe per entry via Set so the
+  // reverse arrays don't grow with the duplication factor and Monaco's
+  // decoration set isn't fed redundant ranges.
+  const reverseMaps = useMemo(() => {
+    const empty = {
+      hir: new Map<number, number[]>(),
+      bc: new Map<number, number[]>(),
+      firstBc: new Map<number, number>(),
+    };
+    if (!compileResult || !isCompileSuccess(compileResult)) return empty;
+    const hir = new Map<number, number[]>();
+    compileResult.hir_source_map.forEach((lines: number[], i: number) => {
+      const monacoLine = i + 1;
+      const unique = lines.length > 1 ? new Set(lines) : lines;
+      for (const ln of unique) {
+        const arr = hir.get(ln);
+        if (arr) arr.push(monacoLine);
+        else hir.set(ln, [monacoLine]);
+      }
+    });
+    const bc = new Map<number, number[]>();
+    const firstBc = new Map<number, number>();
+    compileResult.bytecode_source_map.forEach((lines: number[], i: number) => {
+      const monacoLine = i + 1;
+      const unique = lines.length > 1 ? new Set(lines) : lines;
+      for (const ln of unique) {
+        const arr = bc.get(ln);
+        if (arr) arr.push(monacoLine);
+        else bc.set(ln, [monacoLine]);
+        if (!firstBc.has(ln)) firstBc.set(ln, i);
+      }
+    });
+    return { hir, bc, firstBc };
+  }, [compileResult]);
+
   // Derived: which bytecode PC maps to the cursor source line (for k-history highlight)
   const highlightPC = useMemo(() => {
-    if (!compileResult || !isCompileSuccess(compileResult) || cursorSourceLine === null)
-      return null;
-    const idx = compileResult.bytecode_source_map.findIndex((lines: number[]) =>
-      lines.includes(cursorSourceLine),
-    );
-    return idx >= 0 ? idx : null;
-  }, [cursorSourceLine, compileResult]);
+    if (cursorSourceLine === null) return null;
+    return reverseMaps.firstBc.get(cursorSourceLine) ?? null;
+  }, [cursorSourceLine, reverseMaps]);
 
   // --- Debounced compilation ---
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -264,17 +304,11 @@ export default function App() {
 
     const srcLine = cursorSourceLine;
 
-    // Find HIR ops that map to this source line
-    const hirLines: number[] = [];
-    compileResult.hir_source_map.forEach((lines: number[], i: number) => {
-      if (lines.includes(srcLine)) hirLines.push(i + 1); // Monaco is 1-indexed
-    });
-
-    // Find bytecode instructions that map to this source line
-    const bcLines: number[] = [];
-    compileResult.bytecode_source_map.forEach((lines: number[], i: number) => {
-      if (lines.includes(srcLine)) bcLines.push(i + 1);
-    });
+    // O(1) lookups via the precomputed reverse maps. The forward source
+    // maps stay around for direct cursor->source navigation in the HIR
+    // and bytecode editors.
+    const hirLines = reverseMaps.hir.get(srcLine) ?? [];
+    const bcLines = reverseMaps.bc.get(srcLine) ?? [];
 
     // Highlight the source line itself
     sourceDecosRef.current?.set([
@@ -327,7 +361,7 @@ export default function App() {
     } else {
       bcPcDecosRef.current?.clear();
     }
-  }, [cursorSourceLine, compileResult, rulerColor, diffView]);
+  }, [cursorSourceLine, compileResult, reverseMaps, rulerColor, diffView]);
 
   // --- Editor mount handlers ---
   const onSourceMount: OnMount = (editor) => {
