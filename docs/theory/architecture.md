@@ -16,13 +16,16 @@ The source code mirrors the pipeline stages:
 | `src/python/` | Bindings | Python API via nanobind |
 
 !!! important "Isolation Invariant"
-    The VM (`svm/`) never includes stabilizer tableau code or evaluates tableau mathematics. It executes purely on basic C++ types and arrays.
+    The hot VM bytecode executor never includes stabilizer tableau code or
+    evaluates tableau mathematics. It executes purely on basic C++ types and
+    arrays. API-level analysis helpers may combine a normal VM execution with
+    compiler metadata such as the final Clifford tableau.
 
 ## Stim for fast Tableau operations
 
 Clifft uses [Stim](https://github.com/quantumlib/Stim) exclusively as an AOT mathematical tableau library, **not** as a circuit simulation engine. The runtime VM never touches Stim.
 
-The compiler uses Stim to construct and manipulate the offline Clifford frame $U_C$ through the Heisenberg mapping, and exploits `TableauTransposedRaii` for efficient row operations when synthesizing the Pauli localization sequences emitted by the Back-End. Once compilation finishes, $U_C$ is discarded — the VM executes over the virtual basis alone.
+The compiler uses Stim to construct and manipulate the offline Clifford frame $U_C$ through the Heisenberg mapping, and exploits `TableauTransposedRaii` for efficient row operations when synthesizing the Pauli localization sequences emitted by the Back-End. The hot VM executor does not consult $U_C$ while executing bytecode; the compiled module may retain a final tableau for API-level exact queries such as dense statevector expansion and basis-state probabilities.
 
 ## SVM Bytecode Format
 

@@ -2,7 +2,6 @@
 
 #include "clifft/svm/svm_internal.h"
 #include "clifft/svm/svm_math.h"
-#include "clifft/util/constants.h"
 
 #include <algorithm>
 #include <bit>

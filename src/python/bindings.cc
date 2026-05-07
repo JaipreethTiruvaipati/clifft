@@ -4,6 +4,7 @@
 #include "clifft/circuit/parser.h"
 #include "clifft/frontend/frontend.h"
 #include "clifft/optimizer/bytecode_pass.h"
+#include "clifft/optimizer/drop_non_unitary_pass.h"
 #include "clifft/optimizer/expand_t_pass.h"
 #include "clifft/optimizer/hir_pass_manager.h"
 #include "clifft/optimizer/multi_gate_pass.h"
@@ -31,6 +32,7 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/string_view.h>
 #include <nanobind/stl/vector.h>
+#include <span>
 #include <sstream>
 
 namespace nb = nanobind;
@@ -489,6 +491,12 @@ NB_MODULE(_clifft_core, m) {
         "compute_reference_syndrome() for noiseless reference shots.")
         .def(nb::init<>());
 
+    nb::class_<clifft::DropNonUnitaryPass, clifft::HirPass>(
+        m, "DropNonUnitaryPass",
+        "Drops non-evolution HIR ops so the remaining program is a unitary skeleton.\n"
+        "Not included in the default pass list and not semantics-preserving.")
+        .def(nb::init<>());
+
     m.def(
         "compute_reference_syndrome",
         [](const clifft::HirModule& hir) {
@@ -690,6 +698,7 @@ NB_MODULE(_clifft_core, m) {
 
     nb::class_<clifft::CompiledModule>(m, "Program", "A compiled quantum program")
         .def_prop_ro("peak_rank", [](const clifft::CompiledModule& p) { return p.peak_rank; })
+        .def_prop_ro("num_qubits", [](const clifft::CompiledModule& p) { return p.num_qubits; })
         .def_prop_ro("num_measurements",
                      [](const clifft::CompiledModule& p) { return p.num_measurements; })
         .def_prop_ro("num_detectors",
@@ -1068,4 +1077,20 @@ NB_MODULE(_clifft_core, m) {
             return vec_to_numpy(std::move(sv), {n});
         },
         nb::arg("program"), nb::arg("state"), "Expand the SVM state into a dense statevector.");
+
+    m.def(
+        "_probabilities_from_bitmasks",
+        [](const clifft::CompiledModule& program,
+           nb::ndarray<nb::numpy, const uint64_t, nb::shape<-1, -1>, nb::c_contig> basis_masks) {
+            std::vector<double> probs;
+            {
+                nb::gil_scoped_release release;
+                probs = clifft::probabilities(
+                    program, std::span<const uint64_t>(basis_masks.data(), basis_masks.size()),
+                    basis_masks.shape(0), basis_masks.shape(1));
+            }
+            size_t n = probs.size();
+            return vec_to_numpy(std::move(probs), {n});
+        },
+        nb::arg("program"), nb::arg("basis_masks"), "Internal helper for clifft.probabilities().");
 }
