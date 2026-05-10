@@ -159,6 +159,12 @@ class VirtualFrame {
 
     [[nodiscard]] stim::PauliString<kStimWidth> map_pauli(MaskView destab_mask, MaskView stab_mask,
                                                           bool sign, uint32_t n) {
+        // Note: do not eager-flush here. map_pauli is called once per
+        // mask-carrying HIR op (T_GATE, MEASURE, etc.) and the queue
+        // between consecutive calls is short (the gates emitted by the
+        // previous localize_pauli). Replaying a short queue inline beats
+        // paying a fixed tableau-transpose-scope per op; eager flushing
+        // here regresses T-heavy circuits like QV-20 by ~40%.
         maybe_flush();
 
         stim::PauliString<kStimWidth> p(n);
@@ -189,29 +195,43 @@ class VirtualFrame {
     /// noise channels.
     void map_noise_channel(MaskView in_x, MaskView in_z, MutableMaskView out_x,
                            MutableMaskView out_z, uint32_t n) {
-        maybe_flush();
+        // Flush eagerly here. A noise op typically maps several channels
+        // back to back (e.g. DEPOLARIZE2 has 15) and the lower() loop
+        // visits thousands of noise sites on surface QEC circuits. Each
+        // channel mapping that runs against a non-empty pending queue pays
+        // O(queue_size * n_words) replay cost; flushing once amortizes
+        // that into one tableau update and lets all subsequent channel
+        // mappings see an empty queue (cheap early-out).
+        flush();
 
         out_x.zero_out();
         out_z.zero_out();
         const uint32_t words = (n + 63) / 64;
 
-        auto xor_row = [&](const stim::PauliString<kStimWidth>& row) {
+        // Take the tableau row by view, not by value: materialized_.xs[q]
+        // returns a PauliStringRef (non-owning), and binding it to
+        // `const PauliString<W>&` would copy-construct a fresh PauliString
+        // per call. On QEC circuits this lambda is invoked ~10^5 times per
+        // compile, so the copies were the dominant heap allocator load.
+        auto xor_row = [&](stim::PauliStringRef<kStimWidth> row) {
             for (uint32_t w = 0; w < words && w < out_x.num_words(); ++w) {
                 out_x.words[w] ^= row.xs.u64[w];
                 out_z.words[w] ^= row.zs.u64[w];
             }
         };
 
-        // Iterate set X-bits via a local copy.
-        std::vector<uint64_t> x_scratch(in_x.words.begin(), in_x.words.end());
-        MutableMaskView x_iter{std::span<uint64_t>(x_scratch)};
+        // Iterate set X-bits via a working copy. Reuses member-owned scratch
+        // storage so QEC circuits that map thousands of noise channels per
+        // compile don't pay a heap round-trip per channel.
+        noise_x_scratch_.assign(in_x.words.begin(), in_x.words.end());
+        MutableMaskView x_iter{std::span<uint64_t>(noise_x_scratch_)};
         while (!x_iter.is_zero()) {
             uint32_t q = x_iter.lowest_bit();
             xor_row(materialized_.xs[q]);
             x_iter.clear_lowest_bit();
         }
-        std::vector<uint64_t> z_scratch(in_z.words.begin(), in_z.words.end());
-        MutableMaskView z_iter{std::span<uint64_t>(z_scratch)};
+        noise_z_scratch_.assign(in_z.words.begin(), in_z.words.end());
+        MutableMaskView z_iter{std::span<uint64_t>(noise_z_scratch_)};
         while (!z_iter.is_zero()) {
             uint32_t q = z_iter.lowest_bit();
             xor_row(materialized_.zs[q]);
@@ -297,6 +317,12 @@ class VirtualFrame {
     stim::Tableau<kStimWidth> materialized_;
     std::vector<PendingGate> pending_gates_;
     size_t flush_threshold_;
+
+    // Per-instance scratch buffers reused across calls to map_noise_channel.
+    // QEC circuits with thousands of noise channels per compile would
+    // otherwise allocate and free two std::vector<uint64_t> per call.
+    std::vector<uint64_t> noise_x_scratch_;
+    std::vector<uint64_t> noise_z_scratch_;
 };
 
 struct CompilerContext {
@@ -309,6 +335,13 @@ struct CompilerContext {
     // Playground telemetry (populated by lower(), parallel to bytecode)
     SourceMap source_map;
     std::vector<uint32_t> emit_k_history;  // per-instruction k captured at emit time
+
+    // Scratch buffers reused across calls to localize_pauli. The greedy
+    // CNOT/CZ loop walks per-bit working copies of the X and Z masks; on
+    // QEC circuits localize_pauli runs hundreds of times per compile.
+    std::vector<uint64_t> localize_x_bits;
+    std::vector<uint64_t> localize_z_bits;
+    std::vector<uint64_t> localize_to_clear;
 
     explicit CompilerContext(uint32_t num_qubits, size_t flush_threshold = 128)
         : virtual_frame(num_qubits, flush_threshold), reg_manager(num_qubits) {}
