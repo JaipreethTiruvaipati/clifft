@@ -89,7 +89,8 @@ For QEC workflows, Clifft also supports detector-based post-selection, survivor 
 Clifft 0.3.0 adds strong simulation for unitary circuits with
 `clifft.probabilities()`, which computes exact probabilities for selected
 full-register computational-basis bitstrings without materializing the full
-statevector.
+statevector. (This API is renamed to `clifft.basis_probabilities()` in the
+next release.)
 
 It also removes the old compile-time qubit ceiling by moving Pauli mask storage
 to runtime-width arenas, and improves playground responsiveness on larger
