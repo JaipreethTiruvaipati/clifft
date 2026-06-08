@@ -187,6 +187,9 @@ jobs:
       - name: Install Python package
         run: uv sync --locked
 
+      - name: Audit Python extension exports
+        run: uv run python tools/ci/audit_python_exports.py
+
       - name: Run Python tests (default ISA)
         run: uv run --locked pytest tests/python/ -v
 
@@ -256,6 +259,9 @@ jobs:
           uv venv .smoke-venv
           . .smoke-venv/bin/activate
           uv sync --locked --active --no-dev
+
+      - name: Audit Python extension exports
+        run: .smoke-venv/bin/python tools/ci/audit_python_exports.py
 
       - name: Install qemu-user
         run: sudo apt-get install -y qemu-user
@@ -339,6 +345,9 @@ jobs:
 
       - name: Install Python package
         run: uv sync --locked
+
+      - name: Audit Python extension exports
+        run: uv run python tools/ci/audit_python_exports.py
 
       - name: Run Python tests
         run: uv run --locked pytest tests/python/ -v
