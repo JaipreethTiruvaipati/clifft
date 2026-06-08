@@ -105,6 +105,8 @@ nav:
     - Overview: theory/overview.md
     - Architecture: theory/architecture.md
     - Basis-State Probabilities: theory/basis_probabilities.md
+    - T-count Reduction: theory/tcount.md
+    - T-count Evaluation: theory/tcount_evaluation.md
   - Reference:
     - Supported Gates: reference/gates.md
     - Instruction Reference: reference/instructions.md

@@ -20,6 +20,8 @@ add_executable(clifft_tests
     test_svm_avx512_axis01.cc
     test_statevector.cc
     test_optimizer.cc
+    test_tcount_phasepoly.cc
+    test_tcount_tohpe.cc
     test_bytecode_passes.cc
     test_single_axis_fusion.cc
     test_tile_axis_fusion.cc
@@ -51,3 +53,11 @@ endif()
 
 # Auto-discover Catch2 tests for CTest integration
 catch_discover_tests(clifft_tests)
+
+# Standalone T-count evaluation harness (not a unit test; prints the
+# per-phase benchmark table and commuting-block histogram).
+add_executable(bench_tcount ${CMAKE_CURRENT_SOURCE_DIR}/../tools/bench/tcount/bench_tcount.cc)
+target_link_libraries(bench_tcount PRIVATE clifft_core)
+target_compile_definitions(bench_tcount PRIVATE
+    CLIFFT_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+)

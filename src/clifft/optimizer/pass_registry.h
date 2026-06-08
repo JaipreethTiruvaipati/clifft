@@ -11,6 +11,7 @@
 #include "clifft/optimizer/single_axis_fusion_pass.h"
 #include "clifft/optimizer/statevector_squeeze_pass.h"
 #include "clifft/optimizer/swap_meas_pass.h"
+#include "clifft/optimizer/tcount_phasepoly_pass.h"
 #include "clifft/optimizer/tile_axis_fusion_pass.h"
 
 #include <cstddef>
@@ -63,6 +64,10 @@ inline const PassInfo kRegisteredPasses[] = {
      .kind = PassKind::HIR,
      .default_enabled = false,
      .make_hir = make_hir<DropNonUnitaryPass>},
+    {.name = "TCountPhasePolyPass",
+     .kind = PassKind::HIR,
+     .default_enabled = false,
+     .make_hir = make_hir<TCountPhasePolyPass>},
     // Bytecode passes
     {.name = "NoiseBlockPass",
      .kind = PassKind::Bytecode,

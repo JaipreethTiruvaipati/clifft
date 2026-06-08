@@ -15,6 +15,7 @@
 #include "clifft/optimizer/single_axis_fusion_pass.h"
 #include "clifft/optimizer/statevector_squeeze_pass.h"
 #include "clifft/optimizer/swap_meas_pass.h"
+#include "clifft/optimizer/tcount_phasepoly_pass.h"
 #include "clifft/optimizer/tile_axis_fusion_pass.h"
 #include "clifft/svm/svm.h"
 #include "clifft/util/config.h"
@@ -501,6 +502,26 @@ NB_MODULE(_clifft_core, m) {
         "Drops non-evolution HIR ops so the remaining program is a unitary skeleton.\n"
         "Not included in the default pass list and not semantics-preserving.")
         .def(nb::init<>());
+
+    nb::class_<clifft::TCountPhasePolyPass, clifft::HirPass>(
+        m, "TCountPhasePolyPass",
+        "Experimental, opt-in phase-polynomial T-count pass. Folds per-axis\n"
+        "rotation coefficients (mod 8) within maximal commuting T_GATE blocks\n"
+        "and re-emits the minimal representation. Exactly semantics-preserving;\n"
+        "not in the default pass list. Exposes analyzer metrics for evaluating\n"
+        "the multi-axis (TODD) opportunity that the current HIR cannot capture.")
+        .def(nb::init<bool>(), nb::arg("enable_tohpe") = true)
+        .def_prop_ro("blocks", &clifft::TCountPhasePolyPass::blocks)
+        .def_prop_ro("t_before", &clifft::TCountPhasePolyPass::t_before)
+        .def_prop_ro("t_after", &clifft::TCountPhasePolyPass::t_after)
+        .def_prop_ro("t_removed", &clifft::TCountPhasePolyPass::t_removed)
+        .def_prop_ro("max_block_axes", &clifft::TCountPhasePolyPass::max_block_axes)
+        .def_prop_ro("tohpe_blocks", &clifft::TCountPhasePolyPass::tohpe_blocks)
+        .def_prop_ro("tohpe_removed", &clifft::TCountPhasePolyPass::tohpe_removed)
+        .def("__repr__", [](const clifft::TCountPhasePolyPass& p) {
+            return "TCountPhasePolyPass(blocks=" + std::to_string(p.blocks()) +
+                   ", t_removed=" + std::to_string(p.t_removed()) + ")";
+        });
 
     m.def(
         "compute_reference_syndrome",

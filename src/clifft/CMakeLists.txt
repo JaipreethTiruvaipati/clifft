@@ -18,6 +18,8 @@ add_library(clifft_core STATIC
     optimizer/pass_factory.cc
     optimizer/remove_noise_pass.cc
     optimizer/statevector_squeeze_pass.cc
+    optimizer/tcount_phasepoly_pass.cc
+    optimizer/tcount_tohpe.cc
     backend/backend.cc
     api/basis_probabilities.cc
     api/record_probabilities.cc

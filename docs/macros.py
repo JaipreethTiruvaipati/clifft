@@ -123,6 +123,28 @@ def define_env(env: Any) -> None:
             ),
         },
         {
+            "name": "TCountPhasePolyPass",
+            "kind": "HIR",
+            "default_enabled": False,
+            "python_name": "TCountPhasePolyPass",
+            "summary": "Experimental global T-count pass: phase folding + ancilla-free TOHPE.",
+            "detail": (
+                "Treats each maximal run of consecutive, pairwise-commuting "
+                "T_GATE ops as a phase polynomial whose gate-synthesis matrix is "
+                "read off the virtual Pauli axes (the Cliffords are already "
+                "absorbed into the frame). Phase A folds the per-axis Z_8 "
+                "coefficients (Amy-Maslov-Mosca, arXiv:1303.2042); Phase B runs "
+                "the TOHPE multi-axis reducer (Vandaele, arXiv:2407.08695) on "
+                "single Pauli-type blocks, verifying the exact diagonal unitary "
+                "before accepting and re-absorbing the Clifford residual through "
+                "the frame. Exactly semantics-preserving, opt-in, not in the "
+                "default pipeline. See docs/theory/tcount.md and "
+                "tcount_evaluation.md: folding already matches PeepholeFusionPass, "
+                "and TOHPE only reduces redundant phase polynomials, leaving the "
+                "tested real circuits unchanged in the ancilla-free regime."
+            ),
+        },
+        {
             "name": "NoiseBlockPass",
             "kind": "Bytecode",
             "default_enabled": True,
