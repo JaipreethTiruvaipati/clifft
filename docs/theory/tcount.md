@@ -131,6 +131,38 @@ Clifford (Vandaele Theorem 2, subadditivity).
   emitted `T_GATE` + `PHASE_ROTATION` set against the original phase function, so
   the re-emission is verified regardless of when the residual is absorbed.
 
+### Mixed-type blocks: reduction in a symplectic basis
+
+A commuting block whose axes are all Z-type (or all X-type) is already a parity
+table, and Phase B acts on it directly. A block whose axes **mix** the X and Z
+planes -- which is exactly what a Hadamard-absorbed Toffoli produces, since
+$H\,\text{CCZ}\,H$ leaves $Y$-bearing axes after the frame absorbs the
+Hadamards -- is *not* a parity table in the computational basis. It is still
+simultaneously diagonal, just in a different basis, and TOHPE applies after a
+change of coordinates:
+
+* The axes pairwise commute, so on symplectic vectors $v_k = (x_k \mathbin\| z_k)
+  \in \mathbb{F}_2^{2n}$ they span a subspace. A GF(2) basis $\{g_1,\dots,g_r\}$
+  of that subspace -- chosen from the axes themselves -- is a set of independent,
+  pairwise-commuting Pauli **generators**.
+* Each axis is a GF(2) combination of the generators; that combination is its
+  **coordinate** $c_k \in \mathbb{F}_2^{r}$, a Z-type parity in the joint
+  eigenbasis of the $g_i$ (where $g_i$ has eigenvalue $(-1)^{y_i}$ and the axis
+  has eigenvalue $(-1)^{c_k\cdot y}$). TOHPE runs **unchanged** on those
+  coordinates.
+* A reduced coordinate maps back to the product $\prod_i g_i^{c_i}$, whose mask
+  is the generator XOR and whose sign is the exact signed-Pauli product computed
+  by Stim (the generators commute, so the accumulated $i$-power is even and the
+  product is a $\pm$ Pauli). That signed product carries the eigenvalue
+  $(-1)^{c\cdot y}$ the coordinate-space phase function certified, so it is
+  emitted with its sign intact; a $-1$ is folded into the rotation coefficient.
+
+No diagonalizing Clifford is materialized and no qubit is added -- the basis is
+used only to read coordinates and to rebuild Paulis -- so the mixed-type path
+respects the same structural constraints. It is checked by an exact statevector
+equivalence test on a Hadamard-conjugated dense-CCZ block (a genuinely
+non-diagonal unitary), in addition to the coordinate-space `f(x) mod 8` check.
+
 ## The ancilla-free ceiling (the scientific question)
 
 Clifft cannot add qubits -- the VM allocates exactly `2^{k_max}` amplitudes and

@@ -150,6 +150,44 @@ class TestTohpe:
         pm.run(hir)
         assert int(hir.num_t_gates) == 15  # folding sees 15 distinct axes
 
+    def _ccz(self, a: int, b: int, c: int) -> str:
+        p = self._parity
+        return (
+            p(1 << a)
+            + p(1 << b)
+            + p(1 << c)
+            + p((1 << a) | (1 << b), dag=True)
+            + p((1 << a) | (1 << c), dag=True)
+            + p((1 << b) | (1 << c), dag=True)
+            + p((1 << a) | (1 << b) | (1 << c))
+        )
+
+    def test_mixed_type_block_reduces_and_preserves_statevector(self) -> None:
+        # ccz_complete(6) conjugated by H on {0,1,2}: parities touching those
+        # qubits rotate into the X plane, so the commuting block is MIXED-type.
+        # The mixed-type path diagonalizes it in a symplectic basis, reduces it,
+        # and preserves the (genuinely non-diagonal) unitary exactly.
+        inner = "".join(
+            self._ccz(a, b, c) for a in range(6) for b in range(a + 1, 6) for c in range(b + 1, 6)
+        )
+        text = "H 0\nH 1\nH 2\n" + inner + "H 0\nH 1\nH 2\n"
+
+        # The intended pipeline is peephole then the pass (as in
+        # tools/bench/tcount). Peephole canonicalizes the commuting block first.
+        hir = clifft.trace(clifft.parse(text))
+        t0 = int(hir.num_t_gates)
+        pm = clifft.HirPassManager()
+        pm.add(clifft.PeepholeFusionPass())
+        p = clifft.TCountPhasePolyPass()
+        pm.add(p)
+        pm.run(hir)
+
+        assert p.tohpe_removed > 0  # the mixed-type path fired
+        assert int(hir.num_t_gates) < t0
+        opt = _statevector(clifft.lower(hir))
+        base = _statevector(clifft.compile(text, hir_passes=None, bytecode_passes=None))
+        assert_statevectors_equal(opt, base, msg="mixed-type ccz_complete_6 H-conjugated")
+
 
 # ---------------------------------------------------------------------------
 # Central finding: peephole already reaches the per-block optimum

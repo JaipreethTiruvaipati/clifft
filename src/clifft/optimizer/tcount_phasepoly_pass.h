@@ -25,19 +25,21 @@ namespace clifft {
 ///     "product of single-axis Pauli rotations" representation -- a *local*
 ///     bound, the same one PeepholeFusionPass already reaches; it is not the
 ///     block's global T-count optimum.
-///   - Phase B (TOHPE, on single-Pauli-type blocks): the genuine multi-axis
-///     reducer (Vandaele arXiv:2407.08695). It builds the gate-synthesis matrix
-///     from the parities and applies the duplicate-and-destroy of Algorithm 2
-///     (single-column and pairwise candidates, objective-maximised), going
-///     strictly below Phase A on circuits with cubic redundancy -- e.g.
-///     S_empty 15 -> 0, and the dense diagonal ccz_complete_6 20 -> 12, all
-///     ancilla-free and with no HIR/VM change. Every reduction is verified
-///     against the exact phase function before it is accepted.
+///   - Phase B (TOHPE): the genuine multi-axis reducer (Vandaele
+///     arXiv:2407.08695). It builds the gate-synthesis matrix from the parities
+///     and applies the duplicate-and-destroy of Algorithm 2 (single-column and
+///     pairwise candidates, objective-maximised), going strictly below Phase A
+///     on circuits with cubic redundancy -- e.g. S_empty 15 -> 0, and the dense
+///     diagonal ccz_complete_6 20 -> 12, all ancilla-free with no HIR/VM change.
+///     Single-Pauli-type blocks (all-Z or all-X) are reduced directly; mixed-
+///     type blocks (e.g. Hadamard-absorbed Toffolis, whose axes mix X and Z) are
+///     first diagonalized in a symplectic generator basis, reduced, and mapped
+///     back to product Paulis with exact Stim-computed signs -- entirely in the
+///     HIR, no qubits added. Every reduction is verified against the exact phase
+///     function before it is accepted.
 ///
-/// Even (Clifford) remainders are re-emitted as PHASE_ROTATION ops on the
-/// parity axis, which a following PeepholeFusionPass absorbs into the frame.
-/// Phase B currently acts only on single-Pauli-type blocks (all-Z or all-X);
-/// mixed-type (Hadamard-absorbed) blocks are skipped, a scoped follow-up.
+/// Even (Clifford) remainders are re-emitted as single-axis PHASE_ROTATION ops,
+/// which a following PeepholeFusionPass absorbs into the frame.
 ///
 /// The pass is registered with default_enabled = false and is intended for
 /// evaluation, not the default pipeline. It is exactly semantics-preserving.

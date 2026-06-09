@@ -47,6 +47,7 @@ Bold rows are where Phase B (TOHPE) removes T gates **beyond** peephole.
 | **s_empty_4** | 4 | 15 | 15 | 15 | **0** | **15** | OK |
 | **s_empty_5** | 5 | 31 | 31 | 31 | **0** | **31** | OK |
 | **s_empty_4_minus_full** | 4 | 14 | 14 | 14 | **1** | **13** | OK |
+| **ccz_complete_6_hmixed** | 6 | 140 | 20 | 20 | **12** | **8** | OK |
 | toffoli_single | 3 | 7 | 7 | 7 | 7 | 0 | OK |
 | toffoli_chain_3 | 5 | 21 | 17 | 17 | 17 | 0 | OK |
 | random_6q_d120 | 6 | 34 | 14 | 14 | 14 | 0 | OK |
@@ -59,6 +60,13 @@ diagonal phase polynomial. On `ccz_complete_6` TOHPE removes **8 of 20** T gates
 `PhasePoly TOHPE: dense CCZ-complete block reduces beyond peephole, exact`
 checks the full diagonal $f(x)\bmod 8$ is preserved).
 
+`ccz_complete_6_hmixed` is the same circuit conjugated by Hadamards on three
+qubits: this rotates parities into the X plane so the commuting block is
+**mixed-type** (not all-Z), yet the mixed-type path still removes the same 8 T
+gates. Because the conjugated unitary is genuinely non-diagonal, `equiv = OK`
+here is a full statevector check (amplitudes and global phase), not just a
+diagonal $f(x)$ check -- the strongest correctness evidence in the table.
+
 ## Results: commuting-block structure after peephole
 
 This explains *where the multi-axis reducer can fire*. A "block" is a maximal run
@@ -66,12 +74,15 @@ of consecutive, pairwise-commuting `T_GATE` ops. A block is **single-type** when
 every axis lies in one Pauli plane (all-Z or all-X, i.e. all `x` masks zero or
 all `z` masks zero) and is therefore simultaneously diagonal as binary parities;
 it is **mixed-type** when axes mix X and Z (e.g. some `Y`), so it is not diagonal
-in any computational-basis sense without a further Clifford. Phase B currently
-acts only on single-type blocks (see "single-Pauli-type scope" below).
+in any computational-basis sense without a further Clifford. Phase B reduces
+single-type blocks directly and mixed-type blocks via a symplectic basis change
+(see the theory doc); the column below is kept because the block *type* still
+governs which code path runs and how much work the reduction takes.
 
 | circuit | blocks (>=2) | single-type | mixed-type | largest |
 |---|--:|--:|--:|--:|
 | ccz_complete_6 | 1 | 1 | 0 | 20 |
+| ccz_complete_6_hmixed | 1 | 0 | 1 | 20 |
 | ccz_ladder_6 | 1 | 1 | 0 | 20 |
 | toffoli_single | 1 | 0 | 1 | 7 |
 | toffoli_chain_3 | 3 | 0 | 3 | 7 |
@@ -106,12 +117,17 @@ property of those polynomials, not a search artifact -- it was the addition of
 the single-column candidates that turned `ccz_complete` from 0 into the 8-gate
 reduction above.
 
-**Hadamard-bearing circuits become mixed-type and are skipped (today).** A
+**Hadamard-bearing circuits become mixed-type, and Phase B now handles them.** A
 Toffoli is `H; CCZ; H`; once the front end absorbs the Hadamards into `U_C`, the
-block's axes mix Pauli planes (`toffoli_*`, `random_*` show 0 single-type
-blocks), so the single-type Phase B passes over them. This is Clifft's form of
-the phase-polynomial Hadamard obstacle. Lifting it is a scoped follow-up (below),
-not a property of TOHPE itself.
+block's axes mix Pauli planes (`toffoli_*`, `random_*`, and `*_hmixed` show 0
+single-type blocks). The mixed-type path diagonalizes such a block in a
+symplectic generator basis, reduces it there, and maps the result back to product
+Paulis with exact signs (theory doc, "Mixed-type blocks"). `ccz_complete_6_hmixed`
+demonstrates this: a fully mixed-type block reduced 20 -> 12 with the statevector
+preserved exactly. The Toffoli rows still show `removed = 0` -- not because they
+are skipped, but because a single Toffoli is one CCZ, which is already T-optimal
+(7 T on three qubits, Amy-Maslov-Mosca), and `toffoli_chain_3` is three such
+independent blocks with no shared cubic structure to exploit.
 
 **Calibration against the literature.** The pattern matches Vandaele 2024,
 Table 2 (ancilla-free): structured diagonal circuits reduce, while many standard
@@ -131,27 +147,24 @@ need because they re-synthesise a full circuit.
 
 ## Conclusion: is this worth productionizing?
 
-**Conditionally yes, for diagonal-phase-polynomial-heavy workloads.** Phase B
-demonstrably and exactly reduces ancilla-free T-count on dense diagonal
-structure (`ccz_complete_6`: 20 -> 12, 40% beyond peephole) -- the family that
+**Conditionally yes, for circuits with cubic phase-polynomial redundancy.**
+Phase B demonstrably and exactly reduces ancilla-free T-count on dense diagonal
+structure (`ccz_complete_6`: 20 -> 12, 40% beyond peephole) and on its mixed-type
+Hadamard-conjugate (`ccz_complete_6_hmixed`, same 8 gates) -- the family that
 shows up in IQP sampling, Hamming-weight phasing, and diagonal phase oracles. On
-sparse diagonal structure, on random circuits, and on the real `cultivation_d5`
-circuit it matches peephole, so it should remain **opt-in** rather than default;
-a user targeting diagonal-heavy circuits can enable it for a real win, while a
-user on generic near-Clifford workloads pays nothing by leaving it off.
+sparse structure, on random circuits, and on the real `cultivation_d5` circuit it
+matches peephole, so it should remain **opt-in** rather than default; a user
+targeting structured circuits can enable it for a real win, while a user on
+generic near-Clifford workloads pays nothing by leaving it off.
 
-Scoped follow-ups, in priority order:
+Both block types are handled: single-Pauli-type blocks are reduced directly, and
+mixed-type (Hadamard-absorbed) blocks are reduced via a symplectic basis change
+entirely within the HIR -- so the single-type restriction noted in earlier
+revisions is gone. The remaining follow-ups are:
 
-1. **Single-Pauli-type scope (the one limitation worth lifting first).** Phase B
-   acts only on single-type blocks. A mixed-type commuting block can be mapped to
-   single-type by a symplectic change of basis (the block generates an abelian
-   Pauli group, so a Clifford diagonalises it); the reduced parities map back to
-   product Paulis (mask XOR plus a tracked sign). This stays entirely within the
-   HIR -- it is an algorithmic extension, **not** a VM change -- and would let
-   Phase B act on Toffoli/arithmetic blocks. It is the natural next prototype.
-2. **FastTODD (Vandaele Theorem 6)** in place of TOHPE (Theorem 1), which can
-   find marginally more reductions on single-type blocks.
-3. **Ancillas are the hard ceiling, and that one *is* structural.** The largest
+1. **FastTODD (Vandaele Theorem 6)** in place of TOHPE (Theorem 1), which can
+   find marginally more reductions per block.
+2. **Ancillas are the hard ceiling, and that one *is* structural.** The largest
    op-T-mize gains (GF(2^m) multipliers, adders) come from Hadamard gadgetization,
    which adds qubits and mid-circuit measurement. That is a circuit-level
    transformation, but Clifft's VM allocates exactly `2^{k_max}` amplitudes once
@@ -166,5 +179,6 @@ Gridsynth, and its pre-synthesised Clifford+T outputs are Gridsynth-exploded
 so they are not a meaningful target for a phase-polynomial T-reducer without
 first standing up the full synthesis pipeline. The op-T-mize / Amy benchmark set
 (already Clifford+T: GF(2^m)-mult, adders, `tof_n`, `barenco_tof`) is the right
-real-world corpus, and reaching it requires the single-type lift in follow-up 1,
-since those circuits are Toffoli-based and therefore mixed-type in Clifft.
+real-world corpus; those circuits are Toffoli-based and therefore mixed-type in
+Clifft, which the mixed-type path now handles -- ingesting them only needs a
+`.qc`/QASM -> Stim front end, which is the natural next benchmarking step.

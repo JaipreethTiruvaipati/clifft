@@ -3,6 +3,7 @@
 #include "clifft/optimizer/commutation.h"
 #include "clifft/optimizer/tcount_tohpe.h"
 #include "clifft/util/constants.h"
+#include "clifft/util/stim_mask.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -118,6 +119,255 @@ std::vector<uint64_t> col_to_zmask(const ParityColumn& c, const std::vector<uint
     return z;
 }
 
+// ---------------------------------------------------------------------------
+// Mixed-Pauli-type blocks: lift the single-type restriction by reducing in a
+// symplectic basis (Phase B for blocks whose axes mix X and Z planes).
+//
+// A commuting set of Pauli rotations is simultaneously diagonal in the joint
+// eigenbasis of a generating set {g_1..g_r} of independent, pairwise-commuting
+// Paulis. Each axis P_k is, on (x, z) masks, a GF(2) combination of the
+// generators, so its parity coordinate is that combination -- a Z-type parity
+// in the generator basis. TOHPE runs unchanged on those coordinates; reduced
+// coordinates map back to product Paulis whose mask is the generator XOR and
+// whose sign is the exact Pauli-product sign from Stim. This stays entirely in
+// the HIR (no diagonalizing Clifford is materialized, no qubits added).
+// ---------------------------------------------------------------------------
+
+// A full (x, z, sign) Pauli over the arena width.
+struct FullPauli {
+    std::vector<uint64_t> x;
+    std::vector<uint64_t> z;
+    bool sign = false;
+};
+
+// Overwrite an op's arena mask with a full (x, z, sign) Pauli.
+void write_full_mask(HirModule& hir, const HeisenbergOp& op, const FullPauli& p) {
+    auto m = hir.mask_at(op);
+    auto x = m.x();
+    auto z = m.z();
+    for (uint32_t w = 0; w < x.num_words(); ++w) {
+        x.words[w] = (w < p.x.size()) ? p.x[w] : 0;
+        z.words[w] = (w < p.z.size()) ? p.z[w] : 0;
+    }
+    m.set_sign(p.sign);
+}
+
+// Emit a +1-coefficient T about the (signed) Pauli `p`. The sign is kept on the
+// axis -- a signed Pauli generator-product has the eigenvalue (-1)^{coord.y}
+// that the coordinate-space phase function certified, so stripping it would
+// change the unitary.
+void emit_t_full(HirModule& hir, HeisenbergOp& op, const FullPauli& p) {
+    op.reset_to_tgate(false);
+    write_full_mask(hir, op, p);
+}
+
+void emit_pr_full(HirModule& hir, HeisenbergOp& op, double alpha, const FullPauli& p) {
+    op.reset_to_phase_rotation(alpha);
+    write_full_mask(hir, op, p);
+}
+
+// Build a Stim PauliString from full-width (x, z) masks (sign +).
+stim::PauliString<kStimWidth> make_ps(const std::vector<uint64_t>& x,
+                                      const std::vector<uint64_t>& z, uint32_t n) {
+    stim::PauliString<kStimWidth> p(n);
+    const uint32_t words = (n + 63) / 64;
+    for (uint32_t w = 0; w < words; ++w) {
+        if (w < x.size())
+            p.xs.u64[w] = x[w];
+        if (w < z.size())
+            p.zs.u64[w] = z[w];
+    }
+    return p;
+}
+
+// Product (as signed Hermitian Paulis) of the generators selected by the set
+// bits of `coords`, returning the resulting full (x, z, sign). The generators
+// pairwise commute, so the running product commutes with each next generator
+// and the accumulated i-power is even; sign carries the leftover (-1).
+FullPauli genprod(const std::vector<stim::PauliString<kStimWidth>>& gens,
+                  const ParityColumn& coords, uint32_t n, uint32_t nwords) {
+    stim::PauliString<kStimWidth> prod(n);
+    // Stim's operator*= folds the (-1) part of the i-power into the sign and
+    // asserts the i-power is even -- which holds because the generators (and
+    // hence every partial product) pairwise commute.
+    for (uint32_t i = 0; i < gens.size(); ++i)
+        if (coords.get(i))
+            prod.ref() *= gens[i].ref();
+    FullPauli out;
+    out.x.assign(nwords, 0);
+    out.z.assign(nwords, 0);
+    const uint32_t words = (n + 63) / 64;
+    for (uint32_t w = 0; w < nwords && w < words; ++w) {
+        out.x[w] = prod.xs.u64[w];
+        out.z[w] = prod.zs.u64[w];
+    }
+    out.sign = prod.sign;
+    return out;
+}
+
+// Phase B for mixed-type blocks. Same contract as apply_tohpe: returns true and
+// rewrites the block's slots on a verified reduction, false to fall back.
+bool apply_tohpe_mixed(HirModule& hir, const std::vector<FoldedGroup>& folded,
+                       const std::vector<size_t>& block_slots, std::vector<uint8_t>& deleted,
+                       size_t& tohpe_removed, size_t& t_after_counter) {
+    const uint32_t nwords = hir.pauli_masks.num_words();
+    const uint32_t n = nwords * 64;
+
+    // Collect every nonzero-coefficient axis as a full (sign-normalized) Pauli.
+    struct Term {
+        FullPauli p;
+        int c;
+    };
+    std::vector<Term> terms;
+    for (const auto& fg : folded) {
+        if (fg.c == 0)
+            continue;
+        const HeisenbergOp& rep = hir.ops[fg.slots.front()];
+        FullPauli p;
+        p.x.assign(nwords, 0);
+        p.z.assign(nwords, 0);
+        auto xm = hir.destab_mask(rep);
+        auto zm = hir.stab_mask(rep);
+        for (uint32_t w = 0; w < nwords; ++w) {
+            p.x[w] = xm.words[w];
+            p.z[w] = zm.words[w];
+        }
+        terms.push_back({p, fg.c});
+    }
+    if (terms.size() < 2)
+        return false;
+
+    // Build a GF(2) basis of the axes' symplectic (x || z) vectors. The
+    // generators are the axes selected as pivots, in order. Crucially we track,
+    // for each reduced echelon row, the coordinate vector that rebuilds it from
+    // the ORIGINAL generators (not the eliminated rows), so genprod(coord) below
+    // reproduces the actual Pauli mask. The rank is capped at 14, so the (at
+    // most 14) generator indices fit in a single coordinate word.
+    constexpr uint32_t kMaxRank = 14;
+    const uint32_t two_n = 2 * n;
+    auto sbit = [&](const FullPauli& p, uint32_t i) -> uint64_t {
+        if (i < n)
+            return (p.x[i / 64] >> (i % 64)) & 1ULL;
+        uint32_t j = i - n;
+        return (p.z[j / 64] >> (j % 64)) & 1ULL;
+    };
+    auto to_bits = [&](const FullPauli& p) {
+        std::vector<uint8_t> b(two_n, 0);
+        for (uint32_t i = 0; i < two_n; ++i)
+            b[i] = static_cast<uint8_t>(sbit(p, i));
+        return b;
+    };
+    std::vector<std::vector<uint8_t>> basis_red;  // reduced echelon rows
+    std::vector<ParityColumn> basis_coord;        // each row in generator space
+    std::vector<uint32_t> basis_pivot;
+    std::vector<FullPauli> gen_full;  // generators (= pivot axes)
+
+    // Reduce `v` against the current basis, accumulating its generator-space
+    // coordinates into `coord` (which must start zeroed).
+    auto reduce = [&](std::vector<uint8_t>& v, ParityColumn& coord) {
+        for (size_t b = 0; b < basis_red.size(); ++b) {
+            if (v[basis_pivot[b]]) {
+                for (uint32_t i = 0; i < two_n; ++i)
+                    v[i] ^= basis_red[b][i];
+                coord.xor_with(basis_coord[b]);
+            }
+        }
+    };
+
+    for (const auto& t : terms) {
+        std::vector<uint8_t> v = to_bits(t.p);
+        ParityColumn coord{std::vector<uint64_t>(1, 0)};
+        reduce(v, coord);
+        uint32_t piv = two_n;
+        for (uint32_t i = 0; i < two_n; ++i)
+            if (v[i]) {
+                piv = i;
+                break;
+            }
+        if (piv != two_n) {
+            const uint32_t g = static_cast<uint32_t>(gen_full.size());
+            if (g >= kMaxRank)
+                return false;    // rank too high; 2^rank verify table too large
+            coord.set(g, true);  // v = generator_g (xor the earlier subtractions)
+            basis_red.push_back(v);
+            basis_coord.push_back(coord);
+            basis_pivot.push_back(piv);
+            gen_full.push_back(t.p);
+        }
+    }
+    const uint32_t r = static_cast<uint32_t>(gen_full.size());
+    if (r < 2)
+        return false;
+
+    std::vector<stim::PauliString<kStimWidth>> gens;
+    for (const auto& g : gen_full)
+        gens.push_back(make_ps(g.x, g.z, n));
+
+    // Coordinates of every axis in generator space, with the rotation
+    // coefficient re-expressed about the *signed* generator product
+    // genprod(coord): if that product carries a (-1), the coefficient is negated
+    // so a column always means "+1 T about genprod(coord)". Odd coefficients
+    // become TOHPE columns; even ones are Clifford phases emitted directly.
+    std::vector<ParityColumn> cols;
+    std::vector<int> col_coeff;
+    std::vector<std::pair<FullPauli, int>> evens;  // (signed Pauli, even coeff)
+    for (const auto& t : terms) {
+        std::vector<uint8_t> v = to_bits(t.p);
+        ParityColumn coord{std::vector<uint64_t>(1, 0)};
+        reduce(v, coord);
+        FullPauli gp = genprod(gens, coord, n, nwords);
+        int c = t.c % 8;
+        if (gp.sign)
+            c = (8 - c) % 8;  // P_k = -genprod(coord): negate the coefficient
+        if (c % 2 == 1) {
+            cols.push_back(coord);
+            col_coeff.push_back(c);
+        } else if (c != 0) {
+            evens.push_back({gp, c});
+        }
+    }
+    if (cols.size() < 2)
+        return false;
+
+    TohpeResult res = tohpe_reduce(cols, r);
+    if (res.columns.size() >= cols.size())
+        return false;
+
+    // Odd-coeff remainders (c != 1) become Clifford phases on their own axis.
+    std::vector<std::pair<ParityColumn, int>> col_rem;
+    for (size_t i = 0; i < cols.size(); ++i)
+        if (col_coeff[i] != 1)
+            col_rem.push_back({cols[i], col_coeff[i] - 1});
+
+    const size_t out_count =
+        res.columns.size() + res.residuals.size() + evens.size() + col_rem.size();
+    if (out_count > block_slots.size())
+        return false;
+
+    // Re-emit. Each reduced column is a +1 T about its signed generator product;
+    // residuals and remainders are Clifford PHASE_ROTATIONs about theirs. The
+    // Pauli sign is kept on the axis (it carries the eigenvalue the verified
+    // coordinate-space phase function relies on).
+    size_t si = 0;
+    for (const auto& c : res.columns) {
+        emit_t_full(hir, hir.ops[block_slots[si++]], genprod(gens, c, n, nwords));
+        ++t_after_counter;
+    }
+    for (const auto& rphase : res.residuals)
+        emit_pr_full(hir, hir.ops[block_slots[si++]], 0.25 * rphase.coeff_mod8,
+                     genprod(gens, rphase.parity, n, nwords));
+    for (const auto& [coord, coeff] : col_rem)
+        emit_pr_full(hir, hir.ops[block_slots[si++]], 0.25 * coeff,
+                     genprod(gens, coord, n, nwords));
+    for (const auto& [pauli, coeff] : evens)
+        emit_pr_full(hir, hir.ops[block_slots[si++]], 0.25 * coeff, pauli);
+    while (si < block_slots.size())
+        deleted[block_slots[si++]] = 1;
+
+    tohpe_removed += cols.size() - res.columns.size();
+    return true;
+}
+
 // Phase B: TOHPE multi-axis reduction on a single Z-only commuting block.
 // `folded` carries the per-axis folded coefficients (Phase A). Returns true and
 // rewrites the block's op slots if a genuine multi-axis reduction was found and
@@ -140,7 +390,7 @@ bool apply_tohpe(HirModule& hir, const std::vector<FoldedGroup>& folded,
             all_x = false;
     }
     if (!all_z && !all_x)
-        return false;
+        return apply_tohpe_mixed(hir, folded, block_slots, deleted, tohpe_removed, t_after_counter);
     const bool is_x = all_x && !all_z;
     auto parity_mask = [&](const HeisenbergOp& op) {
         return is_x ? hir.destab_mask(op) : hir.stab_mask(op);

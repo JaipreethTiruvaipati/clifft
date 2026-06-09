@@ -134,15 +134,16 @@ def define_env(env: Any) -> None:
                 "read off the virtual Pauli axes (the Cliffords are already "
                 "absorbed into the frame). Phase A folds the per-axis Z_8 "
                 "coefficients (Amy-Maslov-Mosca, arXiv:1303.2042); Phase B runs "
-                "the TOHPE multi-axis reducer (Vandaele, arXiv:2407.08695) on "
-                "single Pauli-type blocks, verifying the exact diagonal unitary "
-                "before accepting and re-absorbing the Clifford residual through "
-                "the frame. Exactly semantics-preserving, opt-in, not in the "
-                "default pipeline. See docs/theory/tcount.md and "
+                "the TOHPE multi-axis reducer (Vandaele, arXiv:2407.08695), "
+                "verifying the exact unitary before accepting. Single-Pauli-type "
+                "blocks are reduced directly; mixed-type (Hadamard-absorbed) "
+                "blocks are diagonalized in a symplectic generator basis first, "
+                "all within the HIR. Exactly semantics-preserving, opt-in, not in "
+                "the default pipeline. See docs/theory/tcount.md and "
                 "tcount_evaluation.md: folding matches PeepholeFusionPass, while "
-                "TOHPE goes strictly below it on dense diagonal phase polynomials "
+                "TOHPE goes strictly below it on circuits with cubic redundancy "
                 "ancilla-free (e.g. ccz_complete_6: 20 -> 12 T, exact), and leaves "
-                "sparse or Hadamard-bearing (mixed-type) blocks unchanged."
+                "sparse or already-optimal blocks unchanged."
             ),
         },
         {

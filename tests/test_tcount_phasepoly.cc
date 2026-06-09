@@ -334,3 +334,30 @@ TEST_CASE("PhasePoly TOHPE: dense CCZ-complete block reduces beyond peephole, ex
     REQUIRE(pass.tohpe_removed() > 0);
     REQUIRE(hir_phase_fn(hir, 6) == f_before);  // exact diagonal unitary
 }
+
+TEST_CASE("PhasePoly TOHPE: mixed-type (Hadamard-conjugated) block reduces, exact",
+          "[tcount][tohpe]") {
+    // ccz_complete_6 conjugated by H on {0,1,2}: parities touching those qubits
+    // rotate into the X plane, so the commuting block is MIXED-type (not all-Z
+    // or all-X). The mixed-type path diagonalizes it in a symplectic basis and
+    // still reduces it, exactly -- the genuinely non-diagonal check the
+    // dense-CCZ test (whose input state is a |0> eigenstate) cannot make.
+    std::string inner;
+    for (int a = 0; a < 6; ++a)
+        for (int b = a + 1; b < 6; ++b)
+            for (int c = b + 1; c < 6; ++c)
+                inner += ccz_str(a, b, c);
+    const std::string h = "H 0\nH 1\nH 2\n";
+    const std::string text = h + inner + h;
+
+    size_t t0 = hir_from(text.c_str()).num_t_gates();
+    auto hir = hir_from(text.c_str());
+    TCountPhasePolyPass pass;
+    pass.run(hir);
+
+    INFO("t0=" << t0 << " t_after=" << hir.num_t_gates()
+               << " tohpe_removed=" << pass.tohpe_removed());
+    REQUIRE(pass.tohpe_removed() > 0);  // the mixed-type path fired
+    REQUIRE(hir.num_t_gates() < t0);    // and reduced
+    require_equiv(text.c_str());        // exact statevector, incl. global phase
+}
