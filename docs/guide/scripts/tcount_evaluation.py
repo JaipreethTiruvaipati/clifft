@@ -50,6 +50,13 @@ def toffoli_chain(k: int) -> str:
     return "".join(toffoli(i, i + 1, i + 2) for i in range(k))
 
 
+def ccz_complete(nq: int) -> str:
+    """All C(nq, 3) CCZ triples: a dense diagonal phase polynomial."""
+    return "".join(
+        ccz(a, b, c) for a in range(nq) for b in range(a + 1, nq) for c in range(b + 1, nq)
+    )
+
+
 def s_empty(nq: int, skip_full: bool = False) -> str:
     out = []
     for a in range(1, 1 << nq):
@@ -78,15 +85,17 @@ def t_count(text: str, peephole: bool, fold: bool, tohpe: bool) -> tuple[int, in
     return int(hir.num_t_gates), removed, blocks
 
 
+# Mirrors a subset of the C++ harness tools/bench/tcount/bench_tcount.cc, which
+# is the authoritative source (it also reads the real cultivation_d5 fixture and
+# computes the commuting-block histogram).
 CIRCUITS = [
     ("ccz_single", ccz(0, 1, 2)),
-    ("ccz_ladder_2", ccz_ladder(2)),
-    ("ccz_ladder_4", ccz_ladder(4)),
     ("ccz_ladder_6", ccz_ladder(6)),
-    ("s_empty_4", s_empty(4)),
-    ("s_empty_4_minus_full", s_empty(4, skip_full=True)),
-    ("toffoli_single", toffoli(0, 1, 2)),
-    ("toffoli_chain_3", toffoli_chain(3)),
+    ("ccz_complete_6", ccz_complete(6)),  # TOHPE: 20 -> 12 (beyond peephole)
+    ("s_empty_4", s_empty(4)),  # TOHPE: 15 -> 0
+    ("s_empty_4_minus_full", s_empty(4, skip_full=True)),  # TOHPE: 14 -> 1
+    ("toffoli_single", toffoli(0, 1, 2)),  # mixed-type, skipped
+    ("toffoli_chain_3", toffoli_chain(3)),  # mixed-type, skipped
 ]
 
 

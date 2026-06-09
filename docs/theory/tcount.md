@@ -32,10 +32,9 @@ binary parities. In that basis the block is exactly a **phase polynomial**
 (Amy, Maslov, Mosca, *Polynomial-time T-depth Optimization of Clifford+T circuits
 via Matroid Partitioning*, arXiv:1303.2042, 2013, Lemma 3):
 
-```
-U |x> = omega^{p(x)} |g(x)|,   omega = e^{i pi / 4},
-p(x) = sum_k c_k (a_k . x)  (mod 8),   c_k in Z_8,  a_k in F_2^n.
-```
+$$U\,|x\rangle = \omega^{p(x)}\,|g(x)\rangle, \qquad \omega = e^{i\pi/4},$$
+
+$$p(x) = \sum_k c_k\,(a_k \cdot x) \pmod 8, \qquad c_k \in \mathbb{Z}_8,\quad a_k \in \mathbb{F}_2^{n}.$$
 
 Each parity `a_k` with an **odd** coefficient `c_k` costs one T gate; even
 coefficients are Clifford (`c=2` is S, `c=4` is Z). Two phase polynomials that
@@ -52,27 +51,32 @@ phase-folding step of the Tpar algorithm (arXiv:1303.2042, Example 1). On
 Clifft's HIR the parities are read straight off the (x, z) masks, so no parity
 tracking through CNOTs is needed -- the Cliffords are already in `U_C`.
 
-**Folding is provably T-optimal within a commuting block** for any representation
-as a product of Pauli rotations: the rotation characters are orthogonal, so
-distinct axes cannot cancel. `PeepholeFusionPass` already reaches this per-block
-optimum along commuting paths; the unit test
-`test_tcount_phasepoly.py::TestRedundantWithPeephole` confirms Phase A removes
-**zero** further T gates after peephole. Phase A is included only to drive the
-phase-polynomial matrix used by Phase B and to make the per-phase contribution
-measurable in isolation.
+Folding reaches the optimum of the **restricted representation in which the
+block is written as a product of single-axis Pauli rotations** -- and *only*
+that restricted optimum, **not** the global T-count optimum of the block. In
+that representation the rotation characters $(-1)^{a_k\cdot x}$ are orthogonal,
+so two distinct parities cannot cancel and folding cannot do better; this is an
+elementary character-orthogonality argument, not a result quoted from a
+reference. It is a *local* claim about one representation class, and it is
+exactly what Phase B is built to beat: TODD/TOHPE leave the product-of-rotations
+class and exploit the cubic gate-synthesis structure to go strictly below the
+distinct-parity count (e.g. $S_\emptyset$: 15 T $\to$ 0, which folding cannot
+touch). `PeepholeFusionPass` already reaches this folding optimum along commuting
+paths; the unit test `test_tcount_phasepoly.py::TestRedundantWithPeephole`
+confirms Phase A removes **zero** further T gates after peephole. Phase A is
+included only to build the gate-synthesis matrix Phase B consumes and to make
+the per-phase contribution measurable in isolation.
 
 ### Phase B -- multi-axis reduction (TODD / TOHPE)
 
 Going below the distinct-parity count requires the cubic structure of the phase
 polynomial. Stack the odd-coefficient parities of a commuting block as the
-columns of a **gate-synthesis matrix** `A in F_2^{r x m}` (Heyfron and Campbell,
-*An Efficient Quantum Compiler that reduces T count*, arXiv:1712.01557, 2018,
-Lemma II.1). The unitary depends on `A` only through its order-3 **signature
-tensor**
+columns of a **gate-synthesis matrix** $A \in \mathbb{F}_2^{r \times m}$ (Heyfron
+and Campbell, *An Efficient Quantum Compiler that reduces T count*,
+arXiv:1712.01557, 2018, Lemma II.1). The unitary depends on $A$ only through its
+order-3 **signature tensor**
 
-```
-S_{a,b,g} = sum_j A_{a,j} A_{b,j} A_{g,j}  (mod 2),
-```
+$$S_{\alpha\beta\gamma} = \sum_j A_{\alpha,j}\,A_{\beta,j}\,A_{\gamma,j} \pmod 2,$$
 
 so minimizing T-count is the *3rd-order symmetric tensor rank* problem
 (Amy and Mosca, *T-count optimization and Reed-Muller codes*, arXiv:1601.07363,
@@ -82,18 +86,20 @@ Wetering and Amy, arXiv:2310.05958).
 We use the **TOHPE** reducer (Vandaele, *Lower T-count with faster algorithms*,
 arXiv:2407.08695, 2024/2025 -- the current state of the art, faster than and at
 least as good as TODD). TOHPE performs a *duplicate-and-destroy* column update
-`A -> A xor z y^T` that **preserves the signature tensor exactly** when (Vandaele
-Theorem 1)
+$A \to A \oplus z\,y^{T}$ that **preserves the signature tensor exactly** when
+(Vandaele Theorem 1):
 
-```
-C1:  |y|              = 0 (mod 2)
-C2:  |A_a  & y|       = 0 (mod 2)   for all rows a
-C3:  |A_a & A_b & y|  = 0 (mod 2)   for all row pairs a < b
-```
+- $C1:\quad |y| \equiv 0 \pmod 2$
+- $C2:\quad |A_\alpha \wedge y| \equiv 0 \pmod 2 \quad$ for all rows $\alpha$
+- $C3:\quad |A_\alpha \wedge A_\beta \wedge y| \equiv 0 \pmod 2 \quad$ for all row pairs $\alpha < \beta$
 
-with `z = col_a xor col_b`. A `y` satisfying C1-C3 makes two columns duplicates;
-destroying the duplicate pair removes two T gates while leaving the unitary
-unchanged up to a Clifford (Vandaele Theorem 2, subadditivity).
+where $|\cdot|$ is Hamming weight and $\wedge$ is bitwise AND. The candidate
+update vectors are $z \in \{\,c_i \oplus c_j\,\} \cup \{\,c_i\,\}$ -- the pairwise
+column XORs **and** the single columns (Vandaele Algorithm 2, line 2; this PR
+implements both, and picks the move that removes the most columns rather than the
+first feasible one). A valid $(z, y)$ makes two columns duplicates (or zeroes
+one); destroying them removes T gates while leaving the unitary unchanged up to a
+Clifford (Vandaele Theorem 2, subadditivity).
 
 ### Why this fits Clifft with no structural change
 
@@ -110,12 +116,20 @@ unchanged up to a Clifford (Vandaele Theorem 2, subadditivity).
   is never grown (see `claim_empty_pauli_mask`), so the pass respects the
   "no HIR data-structure change" constraint.
 
-* **Clifford residual re-absorbed by existing machinery.** The Clifford that
-  TOHPE leaves behind is diagonal (S/Z on single axes, CZ on axis pairs). The
-  single-axis part is absorbed downstream by the *same* symplectic S-conjugation
-  the peephole already uses (`apply_virtual_s_downstream` /
-  `conjugate_pauli_by_S` in `peephole.cc`), which also updates the final tableau
-  and `global_weight`.
+* **Clifford residual emitted as PHASE_ROTATION, then absorbed by the trailing
+  peephole.** Each duplicate-and-destroy step leaves a *single-axis* Clifford
+  phase: cancelling a duplicate column pair on parity $w$ leaves $T^2 = S$ on
+  that one axis (never a two-axis CZ, because the step only ever removes a
+  duplicate *pair*). The pass re-emits this as a `PHASE_ROTATION` op on $w$
+  (0.5 = S, 1.0 = Z, 1.5 = S_dag), reusing a freed arena slot -- so the pass
+  itself does not call into the tableau machinery. The intended pipeline runs
+  `PeepholeFusionPass` *after* this pass; peephole's standalone Clifford-angle
+  demotion then absorbs those `PHASE_ROTATION`s into the frame via the same
+  symplectic S-conjugation it already uses (`apply_virtual_s_downstream` /
+  `conjugate_pauli_by_S` in `peephole.cc`, updating the final tableau and
+  `global_weight`). The exactness check in `tcount_tohpe.cc` validates the
+  emitted `T_GATE` + `PHASE_ROTATION` set against the original phase function, so
+  the re-emission is verified regardless of when the residual is absorbed.
 
 ## The ancilla-free ceiling (the scientific question)
 

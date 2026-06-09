@@ -141,9 +141,15 @@ TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, siz
     TohpeResult result;
     result.t_before = columns.size();
 
-    // Snapshot the exact phase function for verification (single-word parities,
-    // n_bits <= 14 keeps the 2^n_bits table small). Above that we do not verify
-    // and so conservatively skip Phase B.
+    // We accept a reduction only after checking it preserves the exact phase
+    // function f(x) over all 2^n_bits inputs, where n_bits is the parity width
+    // (the qubit support of the block). The cutoff 14 is a verification-cost
+    // bound, not an algorithmic one: 2^14 = 16384 bytes per f-table, evaluated
+    // for each candidate move, stays in L1 and costs microseconds, while 2^20+
+    // would dominate runtime. Blocks whose support exceeds 14 (rare for the
+    // localized blocks the front end produces) are returned unchanged rather
+    // than reduced unverified. The single-word guard keeps the f-table indexable
+    // by a uint64 mask.
     const bool verifiable = (n_bits <= 14) && (words_for(n_bits) == 1);
     std::vector<ParityColumn> original = columns;
     std::vector<uint8_t> f_target;
@@ -193,36 +199,42 @@ TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, siz
             return (v[j / 64] >> (j % 64)) & 1ULL;
         };
 
-        // Duplicate-and-destroy (Heyfron-Campbell Lemma III.2, Vandaele Alg. 2):
-        // for a column pair (a, b), set z = col_a xor col_b and choose a null
-        // vector y with y_a xor y_b = 1; then A -> A xor z y^T makes columns a
-        // and b identical, and properize destroys the pair. The signature
-        // tensor (cubic part) is preserved by y in nullspace(L); we additionally
-        // verify the full phase function before accepting.
-        bool applied = false;
-        for (uint32_t a = 0; a < m && !applied; ++a) {
-            for (uint32_t b = a + 1; b < m && !applied; ++b) {
+        // Duplicate-and-destroy (Heyfron-Campbell Lemma III.2; Vandaele Alg. 2).
+        // The candidate set of update vectors z is the pairwise column XORs
+        // together with the single columns: Z = {col_i xor col_j} u {col_i}
+        // (Vandaele Alg. 2, line 2). For each candidate z and each null vector
+        // y, the update A -> A xor z y^T (appending z when |y| is odd, to keep
+        // |y| even per condition C1) preserves the order-3 signature tensor;
+        // properize then destroys the duplicate / zeroed columns. We pick the
+        // move that removes the most columns (the objective maximization of
+        // Alg. 2, rather than the first feasible move), and verify the exact
+        // phase function before committing -- the safety net the signature
+        // tensor alone does not give.
+        std::vector<ParityColumn> z_candidates;
+        z_candidates.reserve(static_cast<size_t>(m) * (m + 1) / 2);
+        for (uint32_t a = 0; a < m; ++a) {
+            z_candidates.push_back(columns[a]);  // single-column z = col_a
+            for (uint32_t b = a + 1; b < m; ++b) {
                 ParityColumn z = columns[a];
                 z.xor_with(columns[b]);
-                if (z.is_zero())
-                    continue;  // already duplicate; properize handles it
+                z_candidates.push_back(std::move(z));
+            }
+        }
 
-                // Pick a null vector with y_a xor y_b = 1 (one basis vector
-                // suffices if any has that parity bit).
-                const std::vector<uint64_t>* y = nullptr;
-                for (auto& cand : nullspace) {
-                    if ((vbit(cand, a) ^ vbit(cand, b)) == 1ULL) {
-                        y = &cand;
-                        break;
-                    }
-                }
-                if (!y)
+        size_t best_removed = 0;
+        std::vector<ParityColumn> best_cols;
+        std::vector<ResidualPhase> best_res;
+        for (const auto& z : z_candidates) {
+            if (z.is_zero())
+                continue;
+            for (const auto& y : nullspace) {
+                int wy = popcount_words(y);
+                if (wy == 0)
                     continue;
 
-                int wy = popcount_words(*y);
                 std::vector<ParityColumn> trial = columns;
                 for (uint32_t j = 0; j < m; ++j)
-                    if (vbit(*y, j))
+                    if (vbit(y, j))
                         trial[j].xor_with(z);
                 if (wy & 1)
                     trial.push_back(z);  // keep |y| even (Vandaele C1)
@@ -230,15 +242,23 @@ TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, siz
                 std::vector<ResidualPhase> trial_res = residuals;
                 properize(trial, trial_res);
                 if (trial.size() >= columns.size())
-                    continue;  // no net T reduction
-                // Verify exact phase-function preservation before accepting.
-                if (phase_function(trial, trial_res, n_bits) == f_target) {
-                    columns.swap(trial);
-                    residuals.swap(trial_res);
-                    applied = true;
-                    progress = true;
+                    continue;
+                size_t removed = columns.size() - trial.size();
+                // Verify only when this move could beat the current best, then
+                // accept it as the new best if it preserves the phase function.
+                if (removed > best_removed &&
+                    phase_function(trial, trial_res, n_bits) == f_target) {
+                    best_removed = removed;
+                    best_cols = std::move(trial);
+                    best_res = std::move(trial_res);
                 }
             }
+        }
+
+        if (best_removed > 0) {
+            columns.swap(best_cols);
+            residuals.swap(best_res);
+            progress = true;
         }
     }
 

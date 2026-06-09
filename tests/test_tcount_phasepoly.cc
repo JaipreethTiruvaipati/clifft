@@ -4,6 +4,7 @@
 #include "clifft/circuit/parser.h"
 #include "clifft/frontend/frontend.h"
 #include "clifft/frontend/hir.h"
+#include "clifft/optimizer/peephole.h"
 #include "clifft/optimizer/tcount_phasepoly_pass.h"
 #include "clifft/svm/svm.h"
 #include "clifft/util/constants.h"
@@ -283,4 +284,53 @@ TEST_CASE("PhasePoly TOHPE: 14-parity block collapses to one T, diagonal preserv
     REQUIRE(hir.num_t_gates() >= 1);
     REQUIRE(pass.tohpe_removed() > 0);
     REQUIRE(hir_phase_fn(hir, 4) == f_before);  // exact semantics
+}
+
+// CCZ(a,b,c) as its 7-term phase polynomial (+singles, -pairs, +triple).
+static std::string ccz_str(int a, int b, int c) {
+    auto par = [](uint32_t mask, bool dag) {
+        std::vector<int> bits;
+        for (int q = 0; q < 12; ++q)
+            if (mask & (1u << q))
+                bits.push_back(q);
+        int t = bits[0];
+        std::string s;
+        for (size_t k = 1; k < bits.size(); ++k)
+            s += "CX " + std::to_string(bits[k]) + " " + std::to_string(t) + "\n";
+        s += (dag ? "T_DAG " : "T ") + std::to_string(t) + "\n";
+        for (size_t k = bits.size(); k-- > 1;)
+            s += "CX " + std::to_string(bits[k]) + " " + std::to_string(t) + "\n";
+        return s;
+    };
+    uint32_t A = 1u << a, B = 1u << b, C = 1u << c;
+    return par(A, false) + par(B, false) + par(C, false) + par(A | B, true) + par(A | C, true) +
+           par(B | C, true) + par(A | B | C, false);
+}
+
+TEST_CASE("PhasePoly TOHPE: dense CCZ-complete block reduces beyond peephole, exact",
+          "[tcount][tohpe]") {
+    // All C(6,3)=20 CCZ triples on 6 qubits: a dense diagonal phase polynomial.
+    // Peephole/folding reach 20 T; faithful TOHPE removes more (a real
+    // ancilla-free multi-axis reduction on structured input), exactly.
+    std::string text;
+    for (int a = 0; a < 6; ++a)
+        for (int b = a + 1; b < 6; ++b)
+            for (int c = b + 1; c < 6; ++c)
+                text += ccz_str(a, b, c);
+
+    auto hir_peep = hir_from(text.c_str());
+    PeepholeFusionPass().run(hir_peep);
+    size_t t_peephole = hir_peep.num_t_gates();
+    auto f_before = hir_phase_fn(hir_peep, 6);
+
+    auto hir = hir_from(text.c_str());
+    PeepholeFusionPass().run(hir);
+    TCountPhasePolyPass pass;
+    pass.run(hir);
+
+    INFO("t_peephole=" << t_peephole << " t_after=" << hir.num_t_gates()
+                       << " tohpe_removed=" << pass.tohpe_removed());
+    REQUIRE(hir.num_t_gates() < t_peephole);  // TOHPE beats peephole here
+    REQUIRE(pass.tohpe_removed() > 0);
+    REQUIRE(hir_phase_fn(hir, 6) == f_before);  // exact diagonal unitary
 }

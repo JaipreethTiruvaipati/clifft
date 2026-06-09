@@ -16,23 +16,28 @@ namespace clifft {
 /// whose gate-synthesis matrix is read directly off the T axes' (X, Z) masks,
 /// with no need to track CNOTs.
 ///
-/// Within such a "commuting block" this pass folds the per-axis rotation
-/// coefficients in Z_8 (T = +1, T_dag = -1, T^8 = I, T^2 = S, T^4 = Z) and
-/// re-emits the minimal representation: at most one T_GATE per surviving
-/// odd-coefficient axis, with any even (Clifford) remainder re-emitted as a
-/// PHASE_ROTATION that the existing peephole/back-end then absorbs.
+/// Within such a "commuting block" the pass runs two phases (full theory in
+/// docs/theory/tcount.md; evaluation in tcount_evaluation.md):
 ///
-/// Scope and findings (see docs/reference/passes.md):
-///   - This is provably T-count-optimal *within a commuting block* for the
-///     class of "products of Pauli rotations" that the HIR can express: the
-///     Pauli-rotation characters are orthogonal, so distinct axes cannot
-///     cancel. It reproduces, through an explicit phase-polynomial matrix,
-///     the same per-block reduction that PeepholeFusionPass already achieves.
-///   - Genuine *multi-axis* T-count reduction (TODD / Reed-Muller / ZX) needs
-///     ancilla qubits or Hadamard gadgets, i.e. structure outside the
-///     commuting-Pauli-rotation class. Emitting that structure would require
-///     changing the HIR/VM, which this issue places out of scope. The
-///     analyzer metrics below quantify how much multi-axis opportunity exists.
+///   - Phase A (folding): add the per-axis coefficients in Z_8 (T = +1,
+///     T_dag = -1, T^8 = I, T^2 = S, T^4 = Z) and keep at most one T per
+///     surviving odd-coefficient axis. This reaches the optimum of the
+///     "product of single-axis Pauli rotations" representation -- a *local*
+///     bound, the same one PeepholeFusionPass already reaches; it is not the
+///     block's global T-count optimum.
+///   - Phase B (TOHPE, on single-Pauli-type blocks): the genuine multi-axis
+///     reducer (Vandaele arXiv:2407.08695). It builds the gate-synthesis matrix
+///     from the parities and applies the duplicate-and-destroy of Algorithm 2
+///     (single-column and pairwise candidates, objective-maximised), going
+///     strictly below Phase A on circuits with cubic redundancy -- e.g.
+///     S_empty 15 -> 0, and the dense diagonal ccz_complete_6 20 -> 12, all
+///     ancilla-free and with no HIR/VM change. Every reduction is verified
+///     against the exact phase function before it is accepted.
+///
+/// Even (Clifford) remainders are re-emitted as PHASE_ROTATION ops on the
+/// parity axis, which a following PeepholeFusionPass absorbs into the frame.
+/// Phase B currently acts only on single-Pauli-type blocks (all-Z or all-X);
+/// mixed-type (Hadamard-absorbed) blocks are skipped, a scoped follow-up.
 ///
 /// The pass is registered with default_enabled = false and is intended for
 /// evaluation, not the default pipeline. It is exactly semantics-preserving.

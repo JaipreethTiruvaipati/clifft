@@ -139,9 +139,10 @@ def define_env(env: Any) -> None:
                 "before accepting and re-absorbing the Clifford residual through "
                 "the frame. Exactly semantics-preserving, opt-in, not in the "
                 "default pipeline. See docs/theory/tcount.md and "
-                "tcount_evaluation.md: folding already matches PeepholeFusionPass, "
-                "and TOHPE only reduces redundant phase polynomials, leaving the "
-                "tested real circuits unchanged in the ancilla-free regime."
+                "tcount_evaluation.md: folding matches PeepholeFusionPass, while "
+                "TOHPE goes strictly below it on dense diagonal phase polynomials "
+                "ancilla-free (e.g. ccz_complete_6: 20 -> 12 T, exact), and leaves "
+                "sparse or Hadamard-bearing (mixed-type) blocks unchanged."
             ),
         },
         {

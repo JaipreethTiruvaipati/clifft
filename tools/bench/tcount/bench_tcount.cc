@@ -101,6 +101,26 @@ static std::string s_empty(int nq, bool skip_full = false) {
     return s;
 }
 
+// All C(nq,3) CCZ triples on nq qubits: a dense diagonal phase polynomial with
+// heavy shared cubic structure, the regime where TODD/TOHPE is expected to win.
+static std::string ccz_complete(int nq) {
+    std::string s;
+    for (int a = 0; a < nq; ++a)
+        for (int b = a + 1; b < nq; ++b)
+            for (int c = b + 1; c < nq; ++c)
+                s += ccz(a, b, c);
+    return s;
+}
+
+// CCZ(0, 1, j) for j = 2..k+1: a fan of CCZ gates sharing the control pair
+// {0, 1}, so the parities Z_0, Z_1, Z_0^Z_1 and the pairwise terms recur.
+static std::string ccz_star(int k) {
+    std::string s;
+    for (int j = 2; j < 2 + k; ++j)
+        s += ccz(0, 1, j);
+    return s;
+}
+
 // Deterministic pseudo-random Clifford+T circuit (typical workload).
 static std::string random_clifford_t(int nq, int depth, uint64_t seed) {
     const char* g1[] = {"H", "S", "S_DAG", "X", "Z"};
@@ -243,7 +263,14 @@ int main() {
     circuits.push_back({"ccz_ladder_3", ccz_ladder(3), 5});
     circuits.push_back({"ccz_ladder_4", ccz_ladder(4), 6});
     circuits.push_back({"ccz_ladder_6", ccz_ladder(6), 8});
+    circuits.push_back({"ccz_ladder_10", ccz_ladder(10), 12});
+    circuits.push_back({"ccz_complete_4", ccz_complete(4), 4});
+    circuits.push_back({"ccz_complete_5", ccz_complete(5), 5});
+    circuits.push_back({"ccz_complete_6", ccz_complete(6), 6});
+    circuits.push_back({"ccz_star_5", ccz_star(5), 7});
+    circuits.push_back({"ccz_star_8", ccz_star(8), 10});
     circuits.push_back({"s_empty_4", s_empty(4), 4});
+    circuits.push_back({"s_empty_5", s_empty(5), 5});
     circuits.push_back({"s_empty_4_minus_full", s_empty(4, true), 4});
     circuits.push_back({"toffoli_single", toffoli(0, 1, 2), 3});
     circuits.push_back({"toffoli_chain_3", toffoli_chain(3), 5});

@@ -31,14 +31,21 @@ statevector (n <= 10); diagonal blocks are additionally verified by an exhaustiv
 
 ## Results: per-phase T-count (ancilla-free)
 
+Bold rows are where Phase B (TOHPE) removes T gates **beyond** peephole.
+
 | circuit | n | no-opt | peephole | +foldA | +TOHPE | TOHPE removed | equiv |
 |---|--:|--:|--:|--:|--:|--:|:-:|
 | ccz_single | 3 | 7 | 7 | 7 | 7 | 0 | OK |
 | ccz_ladder_2 | 4 | 14 | 8 | 8 | 8 | 0 | OK |
-| ccz_ladder_3 | 5 | 21 | 11 | 11 | 11 | 0 | OK |
-| ccz_ladder_4 | 6 | 28 | 14 | 14 | 14 | 0 | OK |
 | ccz_ladder_6 | 8 | 42 | 20 | 20 | 20 | 0 | OK |
+| ccz_ladder_10 | 12 | 70 | 32 | 32 | 32 | 0 | n/a |
+| **ccz_complete_4** | 4 | 28 | 8 | 8 | **7** | **1** | OK |
+| ccz_complete_5 | 5 | 70 | 20 | 20 | 20 | 0 | OK |
+| **ccz_complete_6** | 6 | 140 | 20 | 20 | **12** | **8** | OK |
+| ccz_star_5 | 7 | 35 | 23 | 23 | 23 | 0 | OK |
+| ccz_star_8 | 10 | 56 | 32 | 32 | 32 | 0 | OK |
 | **s_empty_4** | 4 | 15 | 15 | 15 | **0** | **15** | OK |
+| **s_empty_5** | 5 | 31 | 31 | 31 | **0** | **31** | OK |
 | **s_empty_4_minus_full** | 4 | 14 | 14 | 14 | **1** | **13** | OK |
 | toffoli_single | 3 | 7 | 7 | 7 | 7 | 0 | OK |
 | toffoli_chain_3 | 5 | 21 | 17 | 17 | 17 | 0 | OK |
@@ -46,16 +53,26 @@ statevector (n <= 10); diagonal blocks are additionally verified by an exhaustiv
 | random_8q_d200 | 8 | 50 | 22 | 22 | 22 | 0 | OK |
 | **cultivation_d5** (real) | 26 | 72 | 72 | 72 | 72 | 0 | n/a |
 
+`ccz_complete_k` is all $\binom{k}{3}$ CCZ gates on $k$ qubits -- a dense
+diagonal phase polynomial. On `ccz_complete_6` TOHPE removes **8 of 20** T gates
+(40%) that peephole could not, and the reduction is verified exact (the test
+`PhasePoly TOHPE: dense CCZ-complete block reduces beyond peephole, exact`
+checks the full diagonal $f(x)\bmod 8$ is preserved).
+
 ## Results: commuting-block structure after peephole
 
-This explains *where the multi-axis reducer can fire*. A block must be a single
-Pauli type (Z-only or X-only) for Phase B to act, and must carry residual cubic
-redundancy for it to find anything.
+This explains *where the multi-axis reducer can fire*. A "block" is a maximal run
+of consecutive, pairwise-commuting `T_GATE` ops. A block is **single-type** when
+every axis lies in one Pauli plane (all-Z or all-X, i.e. all `x` masks zero or
+all `z` masks zero) and is therefore simultaneously diagonal as binary parities;
+it is **mixed-type** when axes mix X and Z (e.g. some `Y`), so it is not diagonal
+in any computational-basis sense without a further Clifford. Phase B currently
+acts only on single-type blocks (see "single-Pauli-type scope" below).
 
 | circuit | blocks (>=2) | single-type | mixed-type | largest |
 |---|--:|--:|--:|--:|
+| ccz_complete_6 | 1 | 1 | 0 | 20 |
 | ccz_ladder_6 | 1 | 1 | 0 | 20 |
-| s_empty_4 | 1 | 1 | 0 | 15 |
 | toffoli_single | 1 | 0 | 1 | 7 |
 | toffoli_chain_3 | 3 | 0 | 3 | 7 |
 | random_8q_d200 | 5 | 0 | 5 | 5 |
@@ -67,65 +84,87 @@ redundancy for it to find anything.
 `+foldA == peephole`. This empirically confirms the theory: `PeepholeFusionPass`
 already reaches the per-block same-axis folding optimum (see also
 `test_tcount_phasepoly.py::TestRedundantWithPeephole`). Phase A exists only to
-build the gate-synthesis matrix and to make the split measurable; it is not a
-source of reduction.
+build the gate-synthesis matrix and to make the per-phase split measurable; it is
+not itself a source of reduction.
 
-**Phase B (TOHPE) is correct and genuinely multi-axis, but only fires on
-redundant phase polynomials.** It is exact (every reduction is verified against
-the full `f(x) mod 8`, and rejected otherwise) and it removes T gates that
-folding provably cannot: `s_empty_4` collapses 15 -> 0 and `s_empty_4_minus_full`
-collapses 14 -> 1 (the optimal single `T_dag` on Z0^Z1^Z2^Z3). These are the
-Amy-Maslov-Mosca trivial-polynomial constructions -- maximally redundant by
-design.
+**Phase B (TOHPE) genuinely reduces ancilla-free T-count, on the circuits that
+carry cubic redundancy.** It removes T gates that folding provably cannot:
+`s_empty_4/5` collapse 15/31 -> 0 (Amy-Maslov-Mosca trivial polynomials),
+`s_empty_4_minus_full` collapses 14 -> 1 (the optimal single `T_dag`), and -- the
+non-degenerate case -- the dense diagonal `ccz_complete_6` drops **20 -> 12**
+ancilla-free. Every accepted reduction is verified against the full
+`f(x) mod 8`, so these are exact. This is direct evidence that the
+implementation reproduces real TOHPE reductions, not just folding.
 
-**On every realistic circuit TOHPE removes zero T gates beyond peephole**, for
-two distinct, measured reasons:
+**TOHPE is selective, and the block-structure table says why.** It fires on
+*dense* shared cubic structure (`ccz_complete_*`) but not on *sparse* structure:
+`ccz_ladder_*` and `ccz_star_*` are single-type but, once same-parity folding is
+applied, carry no residual cubic redundancy, so TOHPE returns them unchanged
+(`removed = 0`). The faithful Vandaele Algorithm 2 search (single-column
+candidates plus pairwise, objective-maximised) confirms this is a genuine
+property of those polynomials, not a search artifact -- it was the addition of
+the single-column candidates that turned `ccz_complete` from 0 into the 8-gate
+reduction above.
 
-1. *Hadamard-bearing structure becomes mixed-type.* A Toffoli is
-   `H; CCZ; H`; after the front end absorbs the Hadamards into `U_C`, the block's
-   T axes are no longer a single Pauli type (`toffoli_*`, `random_*` rows show
-   0 single-type blocks). The single-type reducer skips them. This is Clifft's
-   form of the well-known phase-polynomial Achilles heel (Hadamards); in the
-   op-T-mize literature it is handled by *Hadamard gadgetization with ancillas*,
-   which Clifft's fixed `2^{k_max}` allocation and fixed Pauli arena forbid.
-2. *Single-type blocks are already at their folding optimum.* The CCZ ladders and
-   the real `cultivation_d5` circuit do form large single-type blocks (up to
-   size 19-20), but once same-parity folding is applied there is no residual
-   cubic redundancy for TOHPE to exploit, so it returns them unchanged.
+**Hadamard-bearing circuits become mixed-type and are skipped (today).** A
+Toffoli is `H; CCZ; H`; once the front end absorbs the Hadamards into `U_C`, the
+block's axes mix Pauli planes (`toffoli_*`, `random_*` show 0 single-type
+blocks), so the single-type Phase B passes over them. This is Clifft's form of
+the phase-polynomial Hadamard obstacle. Lifting it is a scoped follow-up (below),
+not a property of TOHPE itself.
 
-**Calibration against the literature.** This is consistent with the ancilla-free
-benchmark numbers of Vandaele 2024 (Table 2), where even a full FastTODD leaves
-the T-count of many standard circuits unchanged, precisely because the large
-op-T-mize reductions come from Hadamard gadgetization (ancillas). Clifft sits
-firmly in the ancilla-free regime.
+**Calibration against the literature.** The pattern matches Vandaele 2024,
+Table 2 (ancilla-free): structured diagonal circuits reduce, while many standard
+benchmarks see little ancilla-free reduction because their headline op-T-mize
+gains come from Hadamard gadgetization with ancillas. Clifft sits in the
+ancilla-free regime, so the dense-diagonal wins (`ccz_complete`) are exactly the
+regime where ancilla-free TOHPE is expected to help.
+
+**Relation to existing implementations.** The published TOHPE/FastTODD reference
+is Vandaele's Rust tool (`VivienVandaele/quantum_circuit_optimization`); TODD has
+Heyfron-Campbell's C++ `TOpt`, and phase folding has Amy's `feynman`/`t-par`.
+Those operate on `{CNOT, T}` QASM circuits and pay an explicit Hadamard/ancilla
+overhead. This PR is a from-scratch in-HIR implementation that consumes the
+already-Clifford-absorbed virtual Pauli axes directly (no CNOT tracking, no
+ancillas) and adds the exact-`f` verification gate, which those tools do not
+need because they re-synthesise a full circuit.
 
 ## Conclusion: is this worth productionizing?
 
-**Not as-is.** On Clifft's realistic near-Clifford workloads -- including the
-real magic-state cultivation circuit and random Clifford+T circuits -- HIR-level
-phase-polynomial T-count reduction yields **no improvement over the existing
-`PeepholeFusionPass`**. The multi-axis TOHPE reducer is correct and provably
-removes T gates that folding cannot, but the circuits where it helps
-(`S_empty`-style redundant phase polynomials) are not representative of what
-Clifft simulates.
+**Conditionally yes, for diagonal-phase-polynomial-heavy workloads.** Phase B
+demonstrably and exactly reduces ancilla-free T-count on dense diagonal
+structure (`ccz_complete_6`: 20 -> 12, 40% beyond peephole) -- the family that
+shows up in IQP sampling, Hamming-weight phasing, and diagonal phase oracles. On
+sparse diagonal structure, on random circuits, and on the real `cultivation_d5`
+circuit it matches peephole, so it should remain **opt-in** rather than default;
+a user targeting diagonal-heavy circuits can enable it for a real win, while a
+user on generic near-Clifford workloads pays nothing by leaving it off.
 
-The evaluation does, however, sharpen *what would have to change* for the
-direction to pay off, and these are the recommended follow-ups:
+Scoped follow-ups, in priority order:
 
-1. **Per-block diagonalization.** Synthesize a Clifford that maps a mixed-type
-   commuting block to single-type before reduction, then re-absorb it through the
-   frame. This would unlock the Toffoli/arithmetic regime (`toffoli_*`) where the
-   literature shows the real reductions live. It is the natural next prototype
-   and stays within the HIR.
-2. **FastTODD (Vandaele Theorem 6)** in place of the simpler TOHPE (Theorem 1)
-   used here, which can find marginally more reductions on single-type blocks.
-3. **The hard ceiling is ancillas.** The headline op-T-mize gains (GF(2^m)
-   multipliers, adders) require Hadamard gadgetization with ancilla qubits.
-   Delivering those in Clifft would mean relaxing the single-allocation /
-   fixed-arena invariants -- a VM-level change explicitly out of scope for this
-   issue, and a separate design discussion.
+1. **Single-Pauli-type scope (the one limitation worth lifting first).** Phase B
+   acts only on single-type blocks. A mixed-type commuting block can be mapped to
+   single-type by a symplectic change of basis (the block generates an abelian
+   Pauli group, so a Clifford diagonalises it); the reduced parities map back to
+   product Paulis (mask XOR plus a tracked sign). This stays entirely within the
+   HIR -- it is an algorithmic extension, **not** a VM change -- and would let
+   Phase B act on Toffoli/arithmetic blocks. It is the natural next prototype.
+2. **FastTODD (Vandaele Theorem 6)** in place of TOHPE (Theorem 1), which can
+   find marginally more reductions on single-type blocks.
+3. **Ancillas are the hard ceiling, and that one *is* structural.** The largest
+   op-T-mize gains (GF(2^m) multipliers, adders) come from Hadamard gadgetization,
+   which adds qubits and mid-circuit measurement. That is a circuit-level
+   transformation, but Clifft's VM allocates exactly `2^{k_max}` amplitudes once
+   and the Pauli arena is fixed at trace time, so introducing new qubits
+   mid-circuit is not expressible without relaxing those invariants -- a separate
+   VM-level design discussion, out of scope here.
 
-In short: the substrate is real and the reducer is verified, but the ancilla-free
-HIR regime that Clifft is constrained to does not, on representative circuits,
-offer T-count reduction beyond what Clifft already does. We recommend keeping the
-pass opt-in and experimental rather than adding it to the default pipeline.
+A note on the FTCircuitBench suite suggested in review: its inputs are
+arbitrary-angle (continuous `rz`/`cu1`) circuits intended to be fed through
+Gridsynth, and its pre-synthesised Clifford+T outputs are Gridsynth-exploded
+(e.g. `qft_4q` -> ~115k T gates from approximation, not algorithmic structure),
+so they are not a meaningful target for a phase-polynomial T-reducer without
+first standing up the full synthesis pipeline. The op-T-mize / Amy benchmark set
+(already Clifford+T: GF(2^m)-mult, adders, `tof_n`, `barenco_tof`) is the right
+real-world corpus, and reaching it requires the single-type lift in follow-up 1,
+since those circuits are Toffoli-based and therefore mixed-type in Clifft.
