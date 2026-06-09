@@ -111,11 +111,16 @@ implementation reproduces real TOHPE reductions, not just folding.
 *dense* shared cubic structure (`ccz_complete_*`) but not on *sparse* structure:
 `ccz_ladder_*` and `ccz_star_*` are single-type but, once same-parity folding is
 applied, carry no residual cubic redundancy, so TOHPE returns them unchanged
-(`removed = 0`). The faithful Vandaele Algorithm 2 search (single-column
-candidates plus pairwise, objective-maximised) confirms this is a genuine
-property of those polynomials, not a search artifact -- it was the addition of
-the single-column candidates that turned `ccz_complete` from 0 into the 8-gate
-reduction above.
+(`removed = 0`). The reducer follows Vandaele Algorithm 2 faithfully -- the
+candidate set is the pairwise column XORs together with the single columns, and
+the move that removes the most columns is chosen rather than the first feasible
+one. On this benchmark the pairwise candidates with a first-feasible choice
+already reach the same reductions (a control run confirms `ccz_complete_6` still
+drops 20 -> 12 and `s_empty` still collapses), so the single-column candidates
+and the objective maximization are included for faithfulness to the algorithm
+and robustness on other inputs, not because these particular numbers depend on
+them. Equally, the `0` on the sparse circuits is a genuine property of those
+polynomials, not a search artifact.
 
 **Hadamard-bearing circuits become mixed-type, and Phase B now handles them.** A
 Toffoli is `H; CCZ; H`; once the front end absorbs the Hadamards into `U_C`, the
@@ -137,7 +142,7 @@ ancilla-free regime, so the dense-diagonal wins (`ccz_complete`) are exactly the
 regime where ancilla-free TOHPE is expected to help.
 
 **Relation to existing implementations.** The published TOHPE/FastTODD reference
-is Vandaele's Rust tool (`VivienVandaele/quantum_circuit_optimization`); TODD has
+is Vandaele's Rust tool (`VivienVandaele/quantum-circuit-optimization`); TODD has
 Heyfron-Campbell's C++ `TOpt`, and phase folding has Amy's `feynman`/`t-par`.
 Those operate on `{CNOT, T}` QASM circuits and pay an explicit Hadamard/ancilla
 overhead. This PR is a from-scratch in-HIR implementation that consumes the
