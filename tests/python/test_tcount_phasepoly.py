@@ -188,6 +188,21 @@ class TestTohpe:
         base = _statevector(clifft.compile(text, hir_passes=None, bytecode_passes=None))
         assert_statevectors_equal(opt, base, msg="mixed-type ccz_complete_6 H-conjugated")
 
+    def test_max_verify_bits_kwarg_gates_reduction(self) -> None:
+        # S_empty(4) spans support 4. A cutoff below 4 disables Phase B; the
+        # default reduces. Checks the binding's max_verify_bits argument.
+        text = "".join(self._parity(a) for a in range(1, 16))
+
+        def t_count(max_verify_bits: int) -> int:
+            hir = clifft.trace(clifft.parse(text))
+            pm = clifft.HirPassManager()
+            pm.add(clifft.TCountPhasePolyPass(max_verify_bits=max_verify_bits))
+            pm.run(hir)
+            return int(hir.num_t_gates)
+
+        assert t_count(3) == 15  # cutoff below the support: unchanged
+        assert t_count(14) < 15  # default cutoff: reduces
+
 
 # ---------------------------------------------------------------------------
 # Central finding: peephole already reaches the per-block optimum
@@ -219,3 +234,37 @@ class TestRedundantWithPeephole:
 
         assert pp.t_removed == 0
         assert int(hir.num_t_gates) == t_after_peephole
+
+
+# ---------------------------------------------------------------------------
+# Pass enabled in the default pipeline: a "default-on" run over the corpus,
+# confirming it composes with the other passes and preserves the circuit.
+# ---------------------------------------------------------------------------
+
+
+class TestPassInDefaultPipeline:
+    @staticmethod
+    def _with_pass(circuit_str: str) -> clifft.Program:
+        """Default HIR pipeline (peephole, squeeze) with the pass inserted."""
+        hir = clifft.trace(clifft.parse(circuit_str))
+        pm = clifft.HirPassManager()
+        pm.add(clifft.PeepholeFusionPass())
+        pm.add(clifft.TCountPhasePolyPass())
+        pm.add(clifft.StatevectorSqueezePass())
+        pm.run(hir)
+        return clifft.lower(hir)
+
+    @pytest.mark.parametrize("num_qubits", [2, 3, 4, 5, 6])
+    @pytest.mark.parametrize("seed", range(6))
+    def test_random_matches_default(self, num_qubits: int, seed: int) -> None:
+        circuit = random_clifford_t_circuit(num_qubits, depth=30, seed=seed)
+        base = _statevector(clifft.compile(circuit))  # default passes
+        opt = _statevector(self._with_pass(circuit))
+        assert_statevectors_equal(opt, base, msg=f"{num_qubits}q seed={seed}")
+
+    @pytest.mark.parametrize("seed", range(5))
+    def test_dense_entangled_matches_default(self, seed: int) -> None:
+        circuit = random_dense_clifford_t_circuit(5, depth=40, seed=seed)
+        base = _statevector(clifft.compile(circuit))
+        opt = _statevector(self._with_pass(circuit))
+        assert_statevectors_equal(opt, base, msg=f"dense 5q seed={seed}")

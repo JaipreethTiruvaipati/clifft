@@ -209,7 +209,7 @@ FullPauli genprod(const std::vector<stim::PauliString<kStimWidth>>& gens,
 // rewrites the block's slots on a verified reduction, false to fall back.
 bool apply_tohpe_mixed(HirModule& hir, const std::vector<FoldedGroup>& folded,
                        const std::vector<size_t>& block_slots, std::vector<uint8_t>& deleted,
-                       size_t& tohpe_removed, size_t& t_after_counter) {
+                       size_t& tohpe_removed, size_t& t_after_counter, uint32_t max_verify_bits) {
     const uint32_t nwords = hir.pauli_masks.num_words();
     const uint32_t n = nwords * 64;
 
@@ -241,9 +241,9 @@ bool apply_tohpe_mixed(HirModule& hir, const std::vector<FoldedGroup>& folded,
     // generators are the axes selected as pivots, in order. Crucially we track,
     // for each reduced echelon row, the coordinate vector that rebuilds it from
     // the ORIGINAL generators (not the eliminated rows), so genprod(coord) below
-    // reproduces the actual Pauli mask. The rank is capped at 14, so the (at
-    // most 14) generator indices fit in a single coordinate word.
-    constexpr uint32_t kMaxRank = 14;
+    // reproduces the actual Pauli mask. The rank is capped at max_verify_bits
+    // (<= 63), so the generator indices fit in a single coordinate word.
+    const uint32_t kMaxRank = max_verify_bits < 63 ? max_verify_bits : 63;
     const uint32_t two_n = 2 * n;
     auto sbit = [&](const FullPauli& p, uint32_t i) -> uint64_t {
         if (i < n)
@@ -329,7 +329,7 @@ bool apply_tohpe_mixed(HirModule& hir, const std::vector<FoldedGroup>& folded,
     if (cols.size() < 2)
         return false;
 
-    TohpeResult res = tohpe_reduce(cols, r);
+    TohpeResult res = tohpe_reduce(cols, r, 256, max_verify_bits);
     if (res.columns.size() >= cols.size())
         return false;
 
@@ -374,12 +374,12 @@ bool apply_tohpe_mixed(HirModule& hir, const std::vector<FoldedGroup>& folded,
 // verified; returns false to fall back to plain folding.
 bool apply_tohpe(HirModule& hir, const std::vector<FoldedGroup>& folded,
                  const std::vector<size_t>& block_slots, std::vector<uint8_t>& deleted,
-                 size_t& tohpe_removed, size_t& t_after_counter) {
+                 size_t& tohpe_removed, size_t& t_after_counter, uint32_t max_verify_bits) {
     const uint32_t nwords = hir.pauli_masks.num_words();
 
-    // The block must be a single Pauli type so its axes are simultaneously
-    // diagonal as parities: all Z-type (X plane empty) or all X-type (Z plane
-    // empty). Mixed/Y blocks need a diagonalizing Clifford and are skipped.
+    // Single-Pauli-type blocks -- all Z-type (X plane empty) or all X-type (Z
+    // plane empty) -- are already diagonal as parities and reduced here. Blocks
+    // that mix X and Z are handled by apply_tohpe_mixed via a basis change.
     bool all_z = true;
     bool all_x = true;
     for (const auto& fg : folded) {
@@ -390,7 +390,8 @@ bool apply_tohpe(HirModule& hir, const std::vector<FoldedGroup>& folded,
             all_x = false;
     }
     if (!all_z && !all_x)
-        return apply_tohpe_mixed(hir, folded, block_slots, deleted, tohpe_removed, t_after_counter);
+        return apply_tohpe_mixed(hir, folded, block_slots, deleted, tohpe_removed, t_after_counter,
+                                 max_verify_bits);
     const bool is_x = all_x && !all_z;
     auto parity_mask = [&](const HeisenbergOp& op) {
         return is_x ? hir.destab_mask(op) : hir.stab_mask(op);
@@ -414,7 +415,7 @@ bool apply_tohpe(HirModule& hir, const std::vector<FoldedGroup>& folded,
     for (uint32_t q = 0; q < nwords * 64; ++q)
         if ((support_mask[q / 64] >> (q % 64)) & 1ULL)
             support.push_back(q);
-    if (support.size() > 14)
+    if (support.size() > max_verify_bits)
         return false;  // verification table 2^s would be too large
     const uint32_t s = static_cast<uint32_t>(support.size());
 
@@ -449,7 +450,7 @@ bool apply_tohpe(HirModule& hir, const std::vector<FoldedGroup>& folded,
         }
     }
 
-    TohpeResult res = tohpe_reduce(cols, s);
+    TohpeResult res = tohpe_reduce(cols, s, 256, max_verify_bits);
     if (res.columns.size() >= cols.size())
         return false;  // TOHPE found no reduction; plain folding is enough
 
@@ -519,6 +520,16 @@ void TCountPhasePolyPass::run(HirModule& hir) {
             continue;
         }
 
+        // Capture the block's source lines before re-synthesis. Phase B
+        // reshuffles which slot carries which Pauli, so a reduced op derives
+        // from the whole block rather than from its slot's original line; the
+        // union is reattached to a surviving slot below.
+        std::vector<uint32_t> block_src;
+        if (has_source_map)
+            for (size_t k = i; k < block_end; ++k)
+                block_src.insert(block_src.end(), hir.source_map[k].begin(),
+                                 hir.source_map[k].end());
+
         // Normalize signs so coefficients depend only on the dagger flag.
         for (size_t k = i; k < block_end; ++k)
             normalize_t_sign(hir, hir.ops[k]);
@@ -567,11 +578,19 @@ void TCountPhasePolyPass::run(HirModule& hir) {
         for (size_t k = i; k < block_end; ++k)
             block_slots.push_back(k);
 
-        // Phase B: TOHPE multi-axis reduction on Z-only blocks; otherwise emit
-        // the Phase A folding result (at most one T per surviving odd axis).
-        if (enable_tohpe_ &&
-            apply_tohpe(hir, folded, block_slots, deleted, tohpe_removed_, t_after_)) {
+        // Phase B: TOHPE multi-axis reduction (single- or mixed-type blocks);
+        // otherwise emit the Phase A folding result (at most one T per surviving
+        // odd axis).
+        if (enable_tohpe_ && apply_tohpe(hir, folded, block_slots, deleted, tohpe_removed_,
+                                         t_after_, max_verify_bits_)) {
             ++tohpe_blocks_;
+            // Reattach the whole block's provenance to its first surviving slot.
+            if (has_source_map)
+                for (size_t slot : block_slots)
+                    if (!deleted[slot]) {
+                        hir.source_map[slot] = block_src;
+                        break;
+                    }
         } else {
             for (const auto& fg : folded) {
                 std::vector<OutOp> out = synthesize(fg.c);

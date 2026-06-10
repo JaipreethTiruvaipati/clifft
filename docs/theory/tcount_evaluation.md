@@ -1,9 +1,9 @@
 # Evaluation: HIR-level global T-count reduction
 
-This is the scientific evaluation of the experimental `TCountPhasePolyPass`
-(issue #40). The theory and citations are in [tcount.md](tcount.md). All numbers
-below are produced by `tools/bench/tcount/bench_tcount.cc` (a standalone harness
-linked against `clifft_core`) and are reproducible with:
+This page evaluates the experimental `TCountPhasePolyPass` (issue #40). The
+theory and citations are in [tcount.md](tcount.md). All numbers below come from
+`tools/bench/tcount/bench_tcount.cc`, a standalone harness linked against
+`clifft_core`, and are reproducible with:
 
 ```
 cmake --build build --target bench_tcount && ./build/tests/bench_tcount
@@ -14,24 +14,27 @@ cmake --build build --target bench_tcount && ./build/tests/bench_tcount
 For each circuit we trace to HIR and measure the T-count under four
 configurations, isolating each optimization phase:
 
-* **no-opt** -- front-end trace only.
-* **peephole** -- `PeepholeFusionPass` (Clifft's existing local optimizer).
-* **+foldA** -- peephole, then `TCountPhasePolyPass(enable_tohpe=false)`
-  (Phase A: phase folding, Amy-Maslov-Mosca arXiv:1303.2042).
-* **+TOHPE** -- peephole, then the full pass (Phase B: TOHPE multi-axis
-  reduction, Vandaele arXiv:2407.08695).
+* `no-opt`: front-end trace only.
+* `peephole`: `PeepholeFusionPass` (Clifft's existing local optimizer).
+* `+foldA`: peephole, then `TCountPhasePolyPass(enable_tohpe=false)` (Phase A
+  folding, Amy-Maslov-Mosca arXiv:1303.2042).
+* `+TOHPE`: peephole, then the full pass (Phase B TOHPE multi-axis reduction,
+  Vandaele arXiv:2407.08695).
 
 Circuits are Clifford+T text. The parser has no CCX/CCZ, so Toffoli and CCZ are
 hand-decomposed; CCZ stays Z-diagonal (its 7-term phase polynomial), while a
-Toffoli's internal Hadamards make its block mixed-type after Clifford
-absorption. `cultivation_d5` is the real distance-5 magic-state cultivation
-fixture shipped with the repo. Equivalence is checked exactly by dense
-statevector (n <= 10); diagonal blocks are additionally verified by an exhaustive
-`f(x) mod 8` check in the TOHPE core and the end-to-end tests.
+Toffoli's internal Hadamards make its block mixed-type after Clifford absorption.
+`cultivation_d5` is the real distance-5 magic-state cultivation fixture shipped
+with the repo. The bench checks equivalence by comparing the peephole'd circuit
+against the peephole + pass circuit amplitude by amplitude, including global
+phase, for n <= 10 (it compares against peephole rather than the raw trace so it
+isolates this pass and not peephole's own up-to-global-phase behaviour). Diagonal
+blocks are additionally verified by an exhaustive `f(x) mod 8` check in the TOHPE
+core and the end-to-end tests.
 
 ## Results: per-phase T-count (ancilla-free)
 
-Bold rows are where Phase B (TOHPE) removes T gates **beyond** peephole.
+Bold rows are where Phase B (TOHPE) removes T gates beyond peephole.
 
 | circuit | n | no-opt | peephole | +foldA | +TOHPE | TOHPE removed | equiv |
 |---|--:|--:|--:|--:|--:|--:|:-:|
@@ -54,30 +57,30 @@ Bold rows are where Phase B (TOHPE) removes T gates **beyond** peephole.
 | random_8q_d200 | 8 | 50 | 22 | 22 | 22 | 0 | OK |
 | **cultivation_d5** (real) | 26 | 72 | 72 | 72 | 72 | 0 | n/a |
 
-`ccz_complete_k` is all $\binom{k}{3}$ CCZ gates on $k$ qubits -- a dense
-diagonal phase polynomial. On `ccz_complete_6` TOHPE removes **8 of 20** T gates
-(40%) that peephole could not, and the reduction is verified exact (the test
-`PhasePoly TOHPE: dense CCZ-complete block reduces beyond peephole, exact`
-checks the full diagonal $f(x)\bmod 8$ is preserved).
+`ccz_complete_k` is all $\binom{k}{3}$ CCZ gates on $k$ qubits, a dense diagonal
+phase polynomial. On `ccz_complete_6` TOHPE removes 8 of 20 T gates (40%) that
+peephole could not, and the reduction is verified exact: the test `PhasePoly
+TOHPE: dense CCZ-complete block reduces beyond peephole, exact` checks that the
+full diagonal $f(x)\bmod 8$ is preserved.
 
 `ccz_complete_6_hmixed` is the same circuit conjugated by Hadamards on three
-qubits: this rotates parities into the X plane so the commuting block is
-**mixed-type** (not all-Z), yet the mixed-type path still removes the same 8 T
-gates. Because the conjugated unitary is genuinely non-diagonal, `equiv = OK`
-here is a full statevector check (amplitudes and global phase), not just a
-diagonal $f(x)$ check -- the strongest correctness evidence in the table.
+qubits. That rotates parities into the X plane so the commuting block is
+mixed-type (not all-Z), yet the mixed-type path still removes the same 8 T gates.
+The conjugated unitary is non-diagonal, so `equiv = OK` here is a full
+statevector check (amplitudes and global phase) rather than a diagonal $f(x)$
+check, which makes it the strongest correctness evidence in the table.
 
 ## Results: commuting-block structure after peephole
 
-This explains *where the multi-axis reducer can fire*. A "block" is a maximal run
-of consecutive, pairwise-commuting `T_GATE` ops. A block is **single-type** when
-every axis lies in one Pauli plane (all-Z or all-X, i.e. all `x` masks zero or
-all `z` masks zero) and is therefore simultaneously diagonal as binary parities;
-it is **mixed-type** when axes mix X and Z (e.g. some `Y`), so it is not diagonal
-in any computational-basis sense without a further Clifford. Phase B reduces
-single-type blocks directly and mixed-type blocks via a symplectic basis change
-(see the theory doc); the column below is kept because the block *type* still
-governs which code path runs and how much work the reduction takes.
+This shows where the multi-axis reducer can fire. A block is a maximal run of
+consecutive, pairwise-commuting `T_GATE` ops. It is single-type when every axis
+lies in one Pauli plane (all-Z or all-X, that is, all `x` masks zero or all `z`
+masks zero), so it is simultaneously diagonal as binary parities; it is
+mixed-type when axes mix X and Z (for example some `Y`), so it is not diagonal in
+the computational basis without a further Clifford. Phase B reduces single-type
+blocks directly and mixed-type blocks through a symplectic basis change (see the
+theory doc). The column is kept because the block type still governs which code
+path runs and how much work the reduction takes.
 
 | circuit | blocks (>=2) | single-type | mixed-type | largest |
 |---|--:|--:|--:|--:|
@@ -91,99 +94,98 @@ governs which code path runs and how much work the reduction takes.
 
 ## Analysis
 
-**Phase A folding contributes nothing beyond peephole.** In every row
-`+foldA == peephole`. This empirically confirms the theory: `PeepholeFusionPass`
-already reaches the per-block same-axis folding optimum (see also
-`test_tcount_phasepoly.py::TestRedundantWithPeephole`). Phase A exists only to
+Phase A folding contributes nothing beyond peephole. In every row `+foldA ==
+peephole`, which confirms the theory: `PeepholeFusionPass` already reaches the
+per-block same-axis folding optimum (see
+`test_tcount_phasepoly.py::TestRedundantWithPeephole`). Phase A is there only to
 build the gate-synthesis matrix and to make the per-phase split measurable; it is
 not itself a source of reduction.
 
-**Phase B (TOHPE) genuinely reduces ancilla-free T-count, on the circuits that
-carry cubic redundancy.** It removes T gates that folding provably cannot:
-`s_empty_4/5` collapse 15/31 -> 0 (Amy-Maslov-Mosca trivial polynomials),
-`s_empty_4_minus_full` collapses 14 -> 1 (the optimal single `T_dag`), and -- the
-non-degenerate case -- the dense diagonal `ccz_complete_6` drops **20 -> 12**
-ancilla-free. Every accepted reduction is verified against the full
-`f(x) mod 8`, so these are exact. This is direct evidence that the
-implementation reproduces real TOHPE reductions, not just folding.
+Phase B (TOHPE) reduces ancilla-free T-count where the block carries cubic
+redundancy. It removes T gates folding cannot: `s_empty_4/5` collapse 15/31 -> 0
+(Amy-Maslov-Mosca trivial polynomials), `s_empty_4_minus_full` 14 -> 1 (one
+`T_dag`), and the dense diagonal `ccz_complete_6` drops 20 -> 12. Every accepted
+move is checked against the full `f(x) mod 8`, so these are exact.
 
-**TOHPE is selective, and the block-structure table says why.** It fires on
-*dense* shared cubic structure (`ccz_complete_*`) but not on *sparse* structure:
+TOHPE is selective, and the block-structure table says why. It fires on dense
+shared cubic structure (`ccz_complete_*`) but not on sparse structure:
 `ccz_ladder_*` and `ccz_star_*` are single-type but, once same-parity folding is
 applied, carry no residual cubic redundancy, so TOHPE returns them unchanged
-(`removed = 0`). The reducer follows Vandaele Algorithm 2 faithfully -- the
-candidate set is the pairwise column XORs together with the single columns, and
-the move that removes the most columns is chosen rather than the first feasible
-one. On this benchmark the pairwise candidates with a first-feasible choice
-already reach the same reductions (a control run confirms `ccz_complete_6` still
-drops 20 -> 12 and `s_empty` still collapses), so the single-column candidates
-and the objective maximization are included for faithfulness to the algorithm
-and robustness on other inputs, not because these particular numbers depend on
-them. Equally, the `0` on the sparse circuits is a genuine property of those
-polynomials, not a search artifact.
+(`removed = 0`). The reducer follows Vandaele Algorithm 2: the candidate set is
+the pairwise column XORs together with the single columns, and the move that
+removes the most columns is chosen rather than the first feasible one. On this
+benchmark the pairwise candidates with a first-feasible choice already reach the
+same reductions (a control run confirms `ccz_complete_6` still drops 20 -> 12 and
+`s_empty` still collapses), so the single-column candidates and the objective
+maximization are included for faithfulness to the algorithm and robustness on
+other inputs, not because these numbers depend on them. The `0` on the sparse
+circuits is a property of those polynomials, not a search artifact.
 
-**Hadamard-bearing circuits become mixed-type, and Phase B now handles them.** A
-Toffoli is `H; CCZ; H`; once the front end absorbs the Hadamards into `U_C`, the
-block's axes mix Pauli planes (`toffoli_*`, `random_*`, and `*_hmixed` show 0
-single-type blocks). The mixed-type path diagonalizes such a block in a
-symplectic generator basis, reduces it there, and maps the result back to product
-Paulis with exact signs (theory doc, "Mixed-type blocks"). `ccz_complete_6_hmixed`
-demonstrates this: a fully mixed-type block reduced 20 -> 12 with the statevector
-preserved exactly. The Toffoli rows still show `removed = 0` -- not because they
-are skipped, but because a single Toffoli is one CCZ, which is already T-optimal
-(7 T on three qubits, Amy-Maslov-Mosca), and `toffoli_chain_3` is three such
-independent blocks with no shared cubic structure to exploit.
+Hadamard-bearing circuits become mixed-type, and Phase B handles them. A Toffoli
+is `H; CCZ; H`; once the front end absorbs the Hadamards into `U_C`, the block's
+axes mix Pauli planes (`toffoli_*`, `random_*`, and `*_hmixed` show 0 single-type
+blocks). The mixed-type path diagonalizes such a block in a symplectic generator
+basis, reduces it there, and maps the result back to product Paulis with exact
+signs (theory doc, "Mixed-type blocks"). `ccz_complete_6_hmixed` shows this: a
+fully mixed-type block reduced 20 -> 12 with the statevector preserved exactly.
+The Toffoli rows still show `removed = 0`, not because they are skipped, but
+because a single Toffoli is one CCZ, which is already T-optimal (7 T on three
+qubits, Amy-Maslov-Mosca), and `toffoli_chain_3` is three such independent blocks
+with no shared cubic structure to exploit.
 
-**Calibration against the literature.** The pattern matches Vandaele 2024,
-Table 2 (ancilla-free): structured diagonal circuits reduce, while many standard
-benchmarks see little ancilla-free reduction because their headline op-T-mize
-gains come from Hadamard gadgetization with ancillas. Clifft sits in the
-ancilla-free regime, so the dense-diagonal wins (`ccz_complete`) are exactly the
-regime where ancilla-free TOHPE is expected to help.
+This matches Vandaele 2024, Table 2 (ancilla-free): structured diagonal circuits
+reduce, while many standard benchmarks see little ancilla-free reduction because
+their headline op-T-mize gains come from Hadamard gadgetization with ancillas.
+Clifft sits in the ancilla-free regime, so the dense-diagonal cases
+(`ccz_complete`) are where ancilla-free TOHPE is expected to help.
 
-**Relation to existing implementations.** The published TOHPE/FastTODD reference
-is Vandaele's Rust tool (`VivienVandaele/quantum-circuit-optimization`); TODD has
+For prior implementations: the published TOHPE/FastTODD reference is Vandaele's
+Rust tool (`VivienVandaele/quantum-circuit-optimization`); TODD has
 Heyfron-Campbell's C++ `TOpt`, and phase folding has Amy's `feynman`/`t-par`.
 Those operate on `{CNOT, T}` QASM circuits and pay an explicit Hadamard/ancilla
 overhead. This PR is a from-scratch in-HIR implementation that consumes the
 already-Clifford-absorbed virtual Pauli axes directly (no CNOT tracking, no
-ancillas) and adds the exact-`f` verification gate, which those tools do not
-need because they re-synthesise a full circuit.
+ancillas) and adds the exact-`f` verification gate, which those tools do not need
+because they re-synthesise a full circuit.
 
 ## Conclusion: is this worth productionizing?
 
-**Conditionally yes, for circuits with cubic phase-polynomial redundancy.**
-Phase B demonstrably and exactly reduces ancilla-free T-count on dense diagonal
-structure (`ccz_complete_6`: 20 -> 12, 40% beyond peephole) and on its mixed-type
-Hadamard-conjugate (`ccz_complete_6_hmixed`, same 8 gates) -- the family that
-shows up in IQP sampling, Hamming-weight phasing, and diagonal phase oracles. On
-sparse structure, on random circuits, and on the real `cultivation_d5` circuit it
-matches peephole, so it should remain **opt-in** rather than default; a user
-targeting structured circuits can enable it for a real win, while a user on
-generic near-Clifford workloads pays nothing by leaving it off.
+Conditionally yes, for circuits with cubic phase-polynomial redundancy. Phase B
+reduces ancilla-free T-count on dense diagonal structure (`ccz_complete_6`: 20 ->
+12, 40% beyond peephole) and on its mixed-type Hadamard-conjugate
+(`ccz_complete_6_hmixed`, the same 8 gates), the family that shows up in IQP
+sampling, Hamming-weight phasing, and diagonal phase oracles. On sparse
+structure, on random circuits, and on the real `cultivation_d5` circuit it
+matches peephole, so it should stay opt-in rather than default: a user targeting
+structured circuits can enable it for a reduction, while a user on generic
+near-Clifford workloads pays nothing by leaving it off.
 
-Both block types are handled: single-Pauli-type blocks are reduced directly, and
-mixed-type (Hadamard-absorbed) blocks are reduced via a symplectic basis change
-entirely within the HIR -- so the single-type restriction noted in earlier
+Both block types are handled. Single-Pauli-type blocks are reduced directly, and
+mixed-type (Hadamard-absorbed) blocks are reduced through a symplectic basis
+change entirely within the HIR, so the single-type restriction noted in earlier
 revisions is gone. The remaining follow-ups are:
 
-1. **FastTODD (Vandaele Theorem 6)** in place of TOHPE (Theorem 1), which can
-   find marginally more reductions per block.
-2. **Ancillas are the hard ceiling, and that one *is* structural.** The largest
-   op-T-mize gains (GF(2^m) multipliers, adders) come from Hadamard gadgetization,
-   which adds qubits and mid-circuit measurement. That is a circuit-level
-   transformation, but Clifft's VM allocates exactly `2^{k_max}` amplitudes once
-   and the Pauli arena is fixed at trace time, so introducing new qubits
-   mid-circuit is not expressible without relaxing those invariants -- a separate
-   VM-level design discussion, out of scope here.
+1. FastTODD (Vandaele Theorem 6) in place of TOHPE (Theorem 1), which can find
+   marginally more reductions per block.
+2. Ancilla-based gadgetization. The largest op-T-mize gains (GF(2^m) multipliers,
+   adders) come from Hadamard gadgetization, which adds qubits and mid-circuit
+   measurement. This is a circuit/HIR-level transformation that runs before
+   lowering, so it does not require a VM change: a circuit with more qubits
+   lowers to a different bytecode trace with a larger `k_max`, and the VM
+   allocates accordingly. The cost is in the resulting trace (more active
+   amplitudes), not in the VM. It is the highest-impact follow-up but the largest
+   in scope, so it is left out of this PR.
 
 A note on the FTCircuitBench suite suggested in review: its inputs are
 arbitrary-angle (continuous `rz`/`cu1`) circuits intended to be fed through
-Gridsynth, and its pre-synthesised Clifford+T outputs are Gridsynth-exploded
-(e.g. `qft_4q` -> ~115k T gates from approximation, not algorithmic structure),
-so they are not a meaningful target for a phase-polynomial T-reducer without
-first standing up the full synthesis pipeline. The op-T-mize / Amy benchmark set
-(already Clifford+T: GF(2^m)-mult, adders, `tof_n`, `barenco_tof`) is the right
-real-world corpus; those circuits are Toffoli-based and therefore mixed-type in
-Clifft, which the mixed-type path now handles -- ingesting them only needs a
-`.qc`/QASM -> Stim front end, which is the natural next benchmarking step.
+Gridsynth, and its pre-synthesised Clifford+T outputs are Gridsynth-exploded (for
+example `qft_4q` reaches about 115k T gates from the approximation, which is
+precision, not algorithmic structure), so they are not a useful target for a
+phase-polynomial T-reducer without first standing up the full synthesis pipeline.
+
+On scope: the op-T-mize / Amy benchmark set (already Clifford+T: GF(2^m)-mult,
+adders, `tof_n`, `barenco_tof`) does not overlap the circuits evaluated above. It
+is the proposed next corpus, not something already measured here. Those circuits
+are Toffoli-based and therefore mixed-type in Clifft, which the mixed-type path
+now handles; the only missing piece is a `.qc`/QASM to Stim importer to read
+them, which is the natural next benchmarking step.

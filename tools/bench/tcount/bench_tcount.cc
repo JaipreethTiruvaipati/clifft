@@ -234,12 +234,15 @@ static BlockStats block_stats(const std::string& text) {
 static bool statevector_equiv(const std::string& text, int nq) {
     if (nq > 10)
         return true;  // not checked here
-    auto sv = [&](bool opt) {
+    // Both arms run peephole first (the pass's actual input); the only
+    // difference is the experimental pass, so the comparison isolates it and can
+    // be made exact. (Comparing against the raw trace would instead surface
+    // PeepholeFusionPass's own up-to-global-phase behavior, not this pass's.)
+    auto sv = [&](bool with_phasepoly) {
         HirModule hir = trace(parse(text));
-        if (opt) {
-            PeepholeFusionPass().run(hir);
+        PeepholeFusionPass().run(hir);
+        if (with_phasepoly)
             TCountPhasePolyPass(true).run(hir);
-        }
         CompiledModule prog = lower(hir);
         SchrodingerState st(prog.peak_rank, prog.total_meas_slots, prog.num_qubits);
         execute(prog, st);
@@ -248,15 +251,12 @@ static bool statevector_equiv(const std::string& text, int nq) {
     auto a = sv(false), b = sv(true);
     if (a.size() != b.size())
         return false;
-    std::complex<double> ip = 0;
-    double na = 0, nb = 0;
-    for (size_t i = 0; i < a.size(); ++i) {
-        ip += std::conj(a[i]) * b[i];
-        na += std::norm(a[i]);
-        nb += std::norm(b[i]);
-    }
-    double fid = (na > 0 && nb > 0) ? std::norm(ip) / (na * nb) : 1.0;
-    return std::abs(fid - 1.0) < 1e-9;
+    // Compare amplitudes directly, including global phase, to match the pass's
+    // exactness guarantee (a fidelity check would hide a global-phase error).
+    for (size_t i = 0; i < a.size(); ++i)
+        if (std::abs(a[i] - b[i]) > 1e-9)
+            return false;
+    return true;
 }
 
 // ---------------------------------------------------------------------------

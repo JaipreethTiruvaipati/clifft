@@ -510,7 +510,8 @@ NB_MODULE(_clifft_core, m) {
         "and re-emits the minimal representation. Exactly semantics-preserving;\n"
         "not in the default pass list. Exposes analyzer metrics for evaluating\n"
         "the multi-axis (TODD) opportunity that the current HIR cannot capture.")
-        .def(nb::init<bool>(), nb::arg("enable_tohpe") = true)
+        .def(nb::init<bool, uint32_t>(), nb::arg("enable_tohpe") = true,
+             nb::arg("max_verify_bits") = 14)
         .def_prop_ro("blocks", &clifft::TCountPhasePolyPass::blocks)
         .def_prop_ro("t_before", &clifft::TCountPhasePolyPass::t_before)
         .def_prop_ro("t_after", &clifft::TCountPhasePolyPass::t_after)

@@ -67,7 +67,10 @@ struct TohpeResult {
 // diagonal unitary exactly: the returned columns plus residuals reproduce the
 // same phase function. `n_bits` is the parity width; `max_cols` caps the work
 // (TOHPE is polynomial but the cap keeps the prototype bounded on large blocks;
-// blocks above the cap are returned unchanged).
-TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, size_t max_cols = 256);
+// blocks above the cap are returned unchanged). `max_verify_bits` caps the
+// 2^n_bits exact-phase-function check: wider blocks are returned unchanged
+// rather than reduced unverified.
+TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, size_t max_cols = 256,
+                         uint32_t max_verify_bits = 14);
 
 }  // namespace clifft

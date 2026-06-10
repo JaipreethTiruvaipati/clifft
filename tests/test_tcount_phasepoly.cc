@@ -11,6 +11,7 @@
 
 #include "test_helpers.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cmath>
@@ -360,4 +361,75 @@ TEST_CASE("PhasePoly TOHPE: mixed-type (Hadamard-conjugated) block reduces, exac
     REQUIRE(pass.tohpe_removed() > 0);  // the mixed-type path fired
     REQUIRE(hir.num_t_gates() < t0);    // and reduced
     require_equiv(text.c_str());        // exact statevector, incl. global phase
+}
+
+// Every source line referenced by the current mapping, as a flat list.
+static std::vector<uint32_t> all_source_lines(const HirModule& hir) {
+    std::vector<uint32_t> v;
+    for (const auto& lines : hir.source_map)
+        for (uint32_t ln : lines)
+            v.push_back(ln);
+    return v;
+}
+
+TEST_CASE("PhasePoly: source map stays consistent after reduction", "[tcount][sourcemap]") {
+    // T on 14 of the 15 nonzero parities of F_2^4: TOHPE collapses it to a
+    // single T, deleting most ops and re-emitting the survivor as a different
+    // Pauli. The source map must stay parallel to ops, reference only lines the
+    // input already had, and consolidate the deleted ops' lines onto a survivor.
+    std::string text;
+    for (uint32_t a = 1; a < 15; ++a)  // skip a == 15 (full parity)
+        text += t_on_parity(a, 4);
+
+    auto hir = hir_from(text.c_str());
+    REQUIRE(hir.source_map.size() == hir.ops.size());
+    const std::vector<uint32_t> orig = all_source_lines(hir);
+    const size_t t_before = hir.num_t_gates();
+
+    TCountPhasePolyPass().run(hir);
+
+    REQUIRE(hir.num_t_gates() < t_before);             // the block actually reduced
+    REQUIRE(hir.source_map.size() == hir.ops.size());  // parallel after compaction
+    size_t max_entries = 0;
+    for (const auto& lines : hir.source_map) {
+        for (uint32_t ln : lines)
+            REQUIRE(std::find(orig.begin(), orig.end(), ln) != orig.end());  // no new line
+        max_entries = std::max(max_entries, lines.size());
+    }
+    // The block's deleted ops are not dropped: their lines are consolidated onto
+    // a surviving op, so at least one op carries more than its own single line.
+    // (Without the reattach every op would map to exactly one line.)
+    REQUIRE(max_entries >= 2);
+}
+
+TEST_CASE("PhasePoly: source map consistent after pure folding", "[tcount][sourcemap]") {
+    // Three T on one axis fold to one T plus an S. No TOHPE fires, so this
+    // exercises the folding re-emit path's source-map handling.
+    auto hir = hir_from("T 0\nT 0\nT 0");
+    REQUIRE(hir.source_map.size() == hir.ops.size());
+    const std::vector<uint32_t> orig = all_source_lines(hir);
+
+    TCountPhasePolyPass().run(hir);
+
+    REQUIRE(hir.source_map.size() == hir.ops.size());  // parallel after compaction
+    for (const auto& lines : hir.source_map)
+        for (uint32_t ln : lines)
+            REQUIRE(std::find(orig.begin(), orig.end(), ln) != orig.end());  // no new line
+}
+
+TEST_CASE("PhasePoly: max_verify_bits gates Phase B", "[tcount][tohpe]") {
+    // S_empty(4) spans support 4. A verify cutoff below 4 leaves Phase B unable
+    // to check the move, so the block is returned unchanged; the default reduces
+    // it. This pins down that the parameter actually controls the behaviour.
+    std::string text;
+    for (uint32_t a = 1; a < 16; ++a)
+        text += t_on_parity(a, 4);
+
+    auto low = hir_from(text.c_str());
+    TCountPhasePolyPass(/*enable_tohpe=*/true, /*max_verify_bits=*/3).run(low);
+    REQUIRE(low.num_t_gates() == 15);  // cutoff below the support: no reduction
+
+    auto def = hir_from(text.c_str());
+    TCountPhasePolyPass(/*enable_tohpe=*/true, /*max_verify_bits=*/14).run(def);
+    REQUIRE(def.num_t_gates() < 15);  // default cutoff: collapses the block
 }

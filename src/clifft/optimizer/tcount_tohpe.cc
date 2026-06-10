@@ -137,20 +137,20 @@ std::vector<uint8_t> phase_function(const std::vector<ParityColumn>& cols,
 
 }  // namespace
 
-TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, size_t max_cols) {
+TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, size_t max_cols,
+                         uint32_t max_verify_bits) {
     TohpeResult result;
     result.t_before = columns.size();
 
-    // We accept a reduction only after checking it preserves the exact phase
-    // function f(x) over all 2^n_bits inputs, where n_bits is the parity width
-    // (the qubit support of the block). The cutoff 14 is a verification-cost
-    // bound, not an algorithmic one: 2^14 = 16384 bytes per f-table, evaluated
-    // for each candidate move, stays in L1 and costs microseconds, while 2^20+
-    // would dominate runtime. Blocks whose support exceeds 14 (rare for the
-    // localized blocks the front end produces) are returned unchanged rather
-    // than reduced unverified. The single-word guard keeps the f-table indexable
-    // by a uint64 mask.
-    const bool verifiable = (n_bits <= 14) && (words_for(n_bits) == 1);
+    // A reduction is accepted only after checking it preserves the exact phase
+    // function f(x) over all 2^n_bits inputs. The f-table is one byte per entry,
+    // so the default cap of 14 holds it to 16 KB; it bounds verification cost,
+    // not the algorithm, and is exposed as a parameter. The reducer runs once
+    // per block at compile time, not per shot, so this is not a runtime
+    // hot-path. Blocks wider than the cap are returned unchanged rather than
+    // reduced unverified. The single-word guard keeps the table indexable by a
+    // uint64 mask.
+    const bool verifiable = (n_bits <= max_verify_bits) && (words_for(n_bits) == 1);
     std::vector<ParityColumn> original = columns;
     std::vector<uint8_t> f_target;
     if (verifiable)

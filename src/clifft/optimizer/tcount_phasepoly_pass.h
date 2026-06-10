@@ -47,8 +47,12 @@ class TCountPhasePolyPass : public HirPass {
   public:
     /// `enable_tohpe` toggles Phase B (the multi-axis TOHPE reducer). With it
     /// off the pass performs only Phase A folding, which is how the evaluation
-    /// isolates each phase's contribution.
-    explicit TCountPhasePolyPass(bool enable_tohpe = true) : enable_tohpe_(enable_tohpe) {}
+    /// isolates each phase's contribution. `max_verify_bits` caps the width of a
+    /// block Phase B will reduce: each accepted move is checked against the exact
+    /// 2^width phase function, so this bounds that check's cost (default 14 ->
+    /// 16 KB table). Wider blocks are left to Phase A folding.
+    explicit TCountPhasePolyPass(bool enable_tohpe = true, uint32_t max_verify_bits = 14)
+        : enable_tohpe_(enable_tohpe), max_verify_bits_(max_verify_bits) {}
 
     void run(HirModule& hir) override;
 
@@ -82,6 +86,7 @@ class TCountPhasePolyPass : public HirPass {
 
   private:
     bool enable_tohpe_ = true;
+    uint32_t max_verify_bits_ = 14;
     size_t blocks_ = 0;
     size_t t_before_ = 0;
     size_t t_after_ = 0;
