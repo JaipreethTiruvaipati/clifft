@@ -53,6 +53,10 @@ Bold rows are where Phase B (TOHPE) removes T gates beyond peephole.
 | **ccz_complete_6_hmixed** | 6 | 140 | 20 | 20 | **12** | **8** | OK |
 | toffoli_single | 3 | 7 | 7 | 7 | 7 | 0 | OK |
 | toffoli_chain_3 | 5 | 21 | 17 | 17 | 17 | 0 | OK |
+| tof_ladder_3 | 5 | 14 | 14 | 14 | 14 | 0 | OK |
+| tof_ladder_5 | 9 | 28 | 28 | 28 | 28 | 0 | OK |
+| mcx_3 | 5 | 28 | 8 | 8 | 8 | 0 | OK |
+| mcx_4 | 7 | 42 | 16 | 16 | 16 | 0 | OK |
 | random_6q_d120 | 6 | 34 | 14 | 14 | 14 | 0 | OK |
 | random_8q_d200 | 8 | 50 | 22 | 22 | 22 | 0 | OK |
 | **cultivation_d5** (real) | 26 | 72 | 72 | 72 | 72 | 0 | n/a |
@@ -133,6 +137,18 @@ because a single Toffoli is one CCZ, which is already T-optimal (7 T on three
 qubits, Amy-Maslov-Mosca), and `toffoli_chain_3` is three such independent blocks
 with no shared cubic structure to exploit.
 
+Real Toffoli-based circuits behave the same way. `tof_ladder_k` (the tof_n
+compute ladder) and `mcx_k` (compute, Z, uncompute) are Clifford+T members of the
+op-T-mize / Amy arithmetic family, and the pass removes nothing beyond peephole on
+any of them. The reason is structural: each Toffoli is an independent, already
+T-optimal CCZ once its Hadamards are absorbed, and on `mcx` the compute/uncompute
+T gates that do cancel are cancelled by peephole, not by Phase B (`mcx_3`:
+28 -> 8 at peephole, then 8 with TOHPE). This is the same boundary the rest of the
+field reports: ancilla-free, arithmetic and reversible-logic circuits give no
+phase-polynomial T reduction, because their reductions come from gadgetization
+with ancillas. The pass earns its keep on diagonal phase-polynomial structure
+(`ccz_complete`), not on arithmetic.
+
 This matches Vandaele 2024, Table 2 (ancilla-free): structured diagonal circuits
 reduce, while many standard benchmarks see little ancilla-free reduction because
 their headline op-T-mize gains come from Hadamard gadgetization with ancillas.
@@ -183,9 +199,11 @@ example `qft_4q` reaches about 115k T gates from the approximation, which is
 precision, not algorithmic structure), so they are not a useful target for a
 phase-polynomial T-reducer without first standing up the full synthesis pipeline.
 
-On scope: the op-T-mize / Amy benchmark set (already Clifford+T: GF(2^m)-mult,
-adders, `tof_n`, `barenco_tof`) does not overlap the circuits evaluated above. It
-is the proposed next corpus, not something already measured here. Those circuits
-are Toffoli-based and therefore mixed-type in Clifft, which the mixed-type path
-now handles; the only missing piece is a `.qc`/QASM to Stim importer to read
-them, which is the natural next benchmarking step.
+On scope: the table above already includes hand-built members of the op-T-mize /
+Amy arithmetic family (`tof_ladder_k`, `mcx_k`), and the result there is a clean
+zero beyond peephole, as discussed in the analysis. The remaining members
+(GF(2^m)-mult, the larger ripple adders, `barenco_tof`) are bigger and tedious to
+transcribe by hand; reading them directly needs a `.qc`/QASM to Stim importer,
+which is the natural next benchmarking step. The expectation from both the
+literature and the `tof`/`mcx` rows here is more of the same: ancilla-free, these
+arithmetic circuits do not yield phase-polynomial T reductions.

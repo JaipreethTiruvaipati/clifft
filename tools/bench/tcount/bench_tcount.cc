@@ -132,6 +132,43 @@ static std::string h_conjugate(const std::string& inner, const std::vector<int>&
     return h + inner + h;
 }
 
+// --- Real-world Toffoli-based circuits (op-T-mize / Amy benchmark family) -----
+// These are Clifford+T after the standard 7-T Toffoli decomposition, exactly the
+// regime the op-T-mize T-count benchmarks live in (tof_n, mcx, arithmetic).
+
+// m-control AND computed as a ladder of (m-1) Toffolis onto intermediate qubits
+// q_m..q_{2m-3}: the tof_n compute pattern.
+static std::string toffoli_ladder(int m) {
+    std::string s;
+    int acc = 0;
+    for (int c = 1; c < m; ++c) {
+        int out = m + (c - 1);
+        s += toffoli(acc, c, out);
+        acc = out;
+    }
+    return s;
+}
+
+// m-control reversible MCX: the AND ladder, a Z on the top output, then the
+// ladder uncomputed. Compute and uncompute share parities, so this is where any
+// ancilla-free cubic cancellation would show up.
+static std::string mcx_full(int m) {
+    std::vector<std::string> tofs;
+    int acc = 0;
+    for (int c = 1; c < m; ++c) {
+        int out = m + (c - 1);
+        tofs.push_back(toffoli(acc, c, out));
+        acc = out;
+    }
+    std::string s;
+    for (const auto& t : tofs)
+        s += t;
+    s += "Z " + std::to_string(acc) + "\n";
+    for (size_t i = tofs.size(); i-- > 0;)
+        s += tofs[i];
+    return s;
+}
+
 // Deterministic pseudo-random Clifford+T circuit (typical workload).
 static std::string random_clifford_t(int nq, int depth, uint64_t seed) {
     const char* g1[] = {"H", "S", "S_DAG", "X", "Z"};
@@ -286,6 +323,12 @@ int main() {
     circuits.push_back({"s_empty_4_minus_full", s_empty(4, true), 4});
     circuits.push_back({"toffoli_single", toffoli(0, 1, 2), 3});
     circuits.push_back({"toffoli_chain_3", toffoli_chain(3), 5});
+    // Real Toffoli-based circuits (op-T-mize / Amy benchmark family).
+    circuits.push_back({"tof_ladder_3", toffoli_ladder(3), 5});
+    circuits.push_back({"tof_ladder_4", toffoli_ladder(4), 7});
+    circuits.push_back({"tof_ladder_5", toffoli_ladder(5), 9});
+    circuits.push_back({"mcx_3", mcx_full(3), 5});
+    circuits.push_back({"mcx_4", mcx_full(4), 7});
     circuits.push_back({"random_6q_d120", random_clifford_t(6, 120, 42), 6});
     circuits.push_back({"random_8q_d200", random_clifford_t(8, 200, 7), 8});
 
