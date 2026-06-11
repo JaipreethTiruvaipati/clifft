@@ -30,8 +30,15 @@ def _compile_optimized(circuit_str: str) -> clifft.Program:
 
 
 def _clifft_statevector(circuit_str: str, *, optimize: bool = False) -> np.ndarray:
-    """Compile and execute circuit in Clifft, return dense statevector."""
-    prog = _compile_optimized(circuit_str) if optimize else clifft.compile(circuit_str)
+    """Compile and execute circuit in Clifft, return dense statevector.
+
+    The optimize=False baseline disables both optimization stages; the
+    default-argument clifft.compile() would run the very passes under test.
+    """
+    if optimize:
+        prog = _compile_optimized(circuit_str)
+    else:
+        prog = clifft.compile(circuit_str, hir_passes=None, bytecode_passes=None)
     state = clifft.State(peak_rank=prog.peak_rank, num_measurements=prog.num_measurements)
     clifft.execute(prog, state)
     sv: np.ndarray = clifft.get_statevector(prog, state)
@@ -155,6 +162,75 @@ class TestPeepholeAlgebraicIdentities:
         sv_baseline = _clifft_statevector(circuit)
         sv_optimized = _clifft_statevector(circuit, optimize=True)
         assert_statevectors_equal(sv_optimized, sv_baseline)
+
+
+# ---------------------------------------------------------------------------
+# Componentwise global-phase preservation of S absorption
+# ---------------------------------------------------------------------------
+
+
+class TestPeepholeExactGlobalPhase:
+    """S absorption must not shift the API-visible global phase.
+
+    When the peephole pass fuses two T gates (or S-angle phase rotations)
+    and absorbs the resulting S/S_dag into the Clifford frame, the tableau
+    fixes the frame only up to global phase. The pass compensates
+    global_weight for stim's matrix canonicalization, so optimized and
+    unoptimized statevectors must agree componentwise -- fidelity checks
+    alone cannot see this.
+    """
+
+    # Each circuit triggers at least one S absorption: T+T fusion,
+    # T_DAG+T_DAG fusion, rotation fusion to S/S_dag, standalone S-angle
+    # demotion, and absorptions on signed, Y-type, and multi-qubit axes.
+    S_ABSORPTION_CIRCUITS = [
+        "H 0\nT 0\nT 0\nH 0",
+        "H 0\nT_DAG 0\nT_DAG 0\nH 0",
+        "H 0\nR_Z(0.25) 0\nR_Z(0.25) 0\nH 0",
+        "H 0\nR_Z(0.5) 0\nH 0",
+        "H 0\nR_Z(1.5) 0\nH 0",
+        "S_DAG 0\nH 0\nT 0\nT 0",
+        "S_DAG 0\nH 0\nCX 2 3\nT 0\nCX 3 1\nT 0",
+        "H 0\nCX 0 1\nT 1\nT 1\nCX 0 1\nH 0",
+        "H 0\nCX 0 1\nT 1\nT 1",
+        "H 0\nCX 0 1\nS 1\nT 1\nT 1\nH 1\nT 1\nT 1",
+        "Y 0\nH 0\nT 0\nT 0\nT 0\nT 0",
+        "H 1\nCX 1 0\nR_Z(0.75) 0\nR_Z(0.75) 0\nH 0",
+        # Absorptions that leave rotations needing virtual-frame routing at
+        # lowering; these exercise the frame composition phase tracking.
+        "H 0\nT 0\nT 0\nT 0\nH 0\nT 0",
+        "CX 0 1\nY 1\nH 0\nR_Z(0.5) 0\nX 0",
+        "CX 0 1\nY 1\nH 0\nT_DAG 0\nT_DAG 0\nX 0",
+        "S_DAG 0\nH 0\nCX 2 3\nT 0\nCX 3 1\nT 0\nH 1\nT 1",
+    ]
+
+    def test_h_t_t_h_exact_amplitudes(self) -> None:
+        """H T T H |0> = [0.5+0.5j, 0.5-0.5j] with the default pipeline."""
+        prog = clifft.compile("H 0\nT 0\nT 0\nH 0")
+        state = clifft.State(peak_rank=prog.peak_rank, num_measurements=prog.num_measurements)
+        clifft.execute(prog, state)
+        sv = clifft.get_statevector(prog, state)
+        np.testing.assert_allclose(sv, [0.5 + 0.5j, 0.5 - 0.5j], atol=1e-6)
+
+    @pytest.mark.parametrize("circuit", S_ABSORPTION_CIRCUITS)
+    def test_componentwise_match(self, circuit: str) -> None:
+        """Optimized amplitudes equal unoptimized ones with no phase alignment."""
+        sv_baseline = _clifft_statevector(circuit)
+        sv_optimized = _clifft_statevector(circuit, optimize=True)
+        np.testing.assert_allclose(sv_optimized, sv_baseline, atol=1e-6)
+
+    @pytest.mark.parametrize("seed", range(20))
+    def test_random_circuits_componentwise(self, seed: int) -> None:
+        """Random Clifford+T circuits agree componentwise, no phase alignment.
+
+        Unlike the fidelity-based equivalence tests above, this catches
+        global-phase drift from S absorption and from the virtual-frame
+        tableau composition at lowering.
+        """
+        circuit = random_clifford_t_circuit(5, depth=30, seed=seed)
+        sv_baseline = _clifft_statevector(circuit)
+        sv_optimized = _clifft_statevector(circuit, optimize=True)
+        np.testing.assert_allclose(sv_optimized, sv_baseline, atol=1e-5)
 
 
 # ---------------------------------------------------------------------------
