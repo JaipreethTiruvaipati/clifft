@@ -195,8 +195,10 @@ NB_MODULE(_clifft_core, m) {
         .value("Z_ERROR", clifft::GateType::Z_ERROR)
         .value("DEPOLARIZE1", clifft::GateType::DEPOLARIZE1)
         .value("DEPOLARIZE2", clifft::GateType::DEPOLARIZE2)
+        .value("DEPOLARIZE3", clifft::GateType::DEPOLARIZE3)
         .value("PAULI_CHANNEL_1", clifft::GateType::PAULI_CHANNEL_1)
         .value("PAULI_CHANNEL_2", clifft::GateType::PAULI_CHANNEL_2)
+        .value("PAULI_CHANNEL_3", clifft::GateType::PAULI_CHANNEL_3)
         .value("READOUT_NOISE", clifft::GateType::READOUT_NOISE)
         // Annotations
         .value("DETECTOR", clifft::GateType::DETECTOR)
@@ -1108,7 +1110,14 @@ NB_MODULE(_clifft_core, m) {
             size_t n = sv.size();
             return vec_to_numpy(std::move(sv), {n});
         },
-        nb::arg("program"), nb::arg("state"), "Expand the SVM state into a dense statevector.");
+        nb::arg("program"), nb::arg("state"),
+        "Expand the SVM state into a dense statevector.\n\n"
+        "For programs without measurements or noise the result is exact,\n"
+        "including its global phase, independent of compilation passes.\n"
+        "After measurements or noise the state is exact only up to a global\n"
+        "phase (which a collapsed state does not physically carry): relative\n"
+        "amplitudes and all probabilities remain exact, but the overall\n"
+        "phase may differ between compilations of the same circuit.");
 
     m.def(
         "_basis_probabilities_from_bitmasks",

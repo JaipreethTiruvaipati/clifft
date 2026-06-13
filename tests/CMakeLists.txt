@@ -20,6 +20,7 @@ add_executable(clifft_tests
     test_svm_avx512_axis01.cc
     test_statevector.cc
     test_optimizer.cc
+    test_canonical_phase.cc
     test_tcount_phasepoly.cc
     test_tcount_tohpe.cc
     test_bytecode_passes.cc
