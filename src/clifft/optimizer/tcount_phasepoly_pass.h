@@ -9,40 +9,31 @@ namespace clifft {
 /// Experimental, opt-in HIR pass exploring global T-count reduction via a
 /// phase-polynomial view of the Heisenberg IR.
 ///
-/// Background: a T gate in the HIR is a pi/8 rotation about a virtual Pauli
-/// axis (the Cliffords are already absorbed into the offline frame U_C). A
-/// maximal run of consecutive, pairwise-commuting T_GATE ops is therefore a
-/// set of simultaneously-diagonalizable rotations -- i.e. a phase polynomial
-/// whose gate-synthesis matrix is read directly off the T axes' (X, Z) masks,
-/// with no need to track CNOTs.
+/// A T gate in the HIR is a pi/8 rotation about a virtual Pauli axis (the
+/// Cliffords are already absorbed into the offline frame U_C). A maximal run of
+/// pairwise-commuting T_GATE ops is a phase polynomial whose gate-synthesis
+/// matrix is read directly off the T axes' (X, Z) masks. Within such a block the
+/// pass runs two phases (theory in docs/theory/tcount.md, evaluation in
+/// tcount_evaluation.md):
 ///
-/// Within such a "commuting block" the pass runs two phases (full theory in
-/// docs/theory/tcount.md; evaluation in tcount_evaluation.md):
+///   - Phase A (folding): adds the per-axis coefficients in Z_8 and keeps at
+///     most one T per surviving odd-coefficient axis. PeepholeFusionPass already
+///     reaches this same per-block optimum.
+///   - Phase B (TOHPE, Vandaele arXiv:2407.08695): the multi-axis reducer that
+///     can drop below the distinct-axis count using the block's cubic structure.
+///     It runs only on single-Pauli-type blocks (all-Z or all-X), where the
+///     diagonal phase function f(x) mod 8 is the exact unitary, and accepts a
+///     duplicate-and-destroy move only if it preserves that f exactly. That is a
+///     subset of the moves Algorithm 2's Theorem 1 permits (Theorem 1 allows a
+///     Clifford correction, including quadratic terms, that this check rejects),
+///     traded for an exactly-verified result. Mixed-X/Z blocks are left to
+///     Phase A.
 ///
-///   - Phase A (folding): add the per-axis coefficients in Z_8 (T = +1,
-///     T_dag = -1, T^8 = I, T^2 = S, T^4 = Z) and keep at most one T per
-///     surviving odd-coefficient axis. This reaches the optimum of the
-///     "product of single-axis Pauli rotations" representation -- a *local*
-///     bound, the same one PeepholeFusionPass already reaches; it is not the
-///     block's global T-count optimum.
-///   - Phase B (TOHPE): the genuine multi-axis reducer (Vandaele
-///     arXiv:2407.08695). It builds the gate-synthesis matrix from the parities
-///     and applies the duplicate-and-destroy of Algorithm 2 (single-column and
-///     pairwise candidates, objective-maximised), going strictly below Phase A
-///     on circuits with cubic redundancy -- e.g. S_empty 15 -> 0, and the dense
-///     diagonal ccz_complete_6 20 -> 12, all ancilla-free with no HIR/VM change.
-///     Single-Pauli-type blocks (all-Z or all-X) are reduced directly; mixed-
-///     type blocks (e.g. Hadamard-absorbed Toffolis, whose axes mix X and Z) are
-///     first diagonalized in a symplectic generator basis, reduced, and mapped
-///     back to product Paulis with exact Stim-computed signs -- entirely in the
-///     HIR, no qubits added. Every reduction is verified against the exact phase
-///     function before it is accepted.
+/// Clifford remainders are re-emitted as single-axis PHASE_ROTATION ops that a
+/// following PeepholeFusionPass absorbs into the frame.
 ///
-/// Even (Clifford) remainders are re-emitted as single-axis PHASE_ROTATION ops,
-/// which a following PeepholeFusionPass absorbs into the frame.
-///
-/// The pass is registered with default_enabled = false and is intended for
-/// evaluation, not the default pipeline. It is exactly semantics-preserving.
+/// Registered with default_enabled = false; opt-in, and exactly
+/// semantics-preserving on the blocks it reduces.
 class TCountPhasePolyPass : public HirPass {
   public:
     /// `enable_tohpe` toggles Phase B (the multi-axis TOHPE reducer). With it

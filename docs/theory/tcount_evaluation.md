@@ -50,7 +50,7 @@ Bold rows are where Phase B (TOHPE) removes T gates beyond peephole.
 | **s_empty_4** | 4 | 15 | 15 | 15 | **0** | **15** | OK |
 | **s_empty_5** | 5 | 31 | 31 | 31 | **0** | **31** | OK |
 | **s_empty_4_minus_full** | 4 | 14 | 14 | 14 | **1** | **13** | OK |
-| **ccz_complete_6_hmixed** | 6 | 140 | 20 | 20 | **12** | **8** | OK |
+| s_empty_4_bellmixed | 4 | 15 | 15 | 15 | 15 | 0 | OK |
 | toffoli_single | 3 | 7 | 7 | 7 | 7 | 0 | OK |
 | toffoli_chain_3 | 5 | 21 | 17 | 17 | 17 | 0 | OK |
 | tof_ladder_3 | 5 | 14 | 14 | 14 | 14 | 0 | OK |
@@ -67,12 +67,12 @@ peephole could not, and the reduction is verified exact: the test `PhasePoly
 TOHPE: dense CCZ-complete block reduces beyond peephole, exact` checks that the
 full diagonal $f(x)\bmod 8$ is preserved.
 
-`ccz_complete_6_hmixed` is the same circuit conjugated by Hadamards on three
-qubits. That rotates parities into the X plane so the commuting block is
-mixed-type (not all-Z), yet the mixed-type path still removes the same 8 T gates.
-The conjugated unitary is non-diagonal, so `equiv = OK` here is a full
-statevector check (amplitudes and global phase) rather than a diagonal $f(x)$
-check, which makes it the strongest correctness evidence in the table.
+`s_empty_4_bellmixed` is the same inner `s_empty(4)` wrapped in an entangling
+Clifford (`CX 0 1; H 0; ... ; H 0; CX 0 1`). That makes the commuting block
+mixed-type, so Phase B leaves it untouched (`removed = 0`) and the unitary is
+preserved exactly. It is the regression for the mixed-type scope: an earlier
+version reduced such a block but dropped a global phase, which the exact-amplitude
+`equiv` check (not fidelity) catches.
 
 ## Results: commuting-block structure after peephole
 
@@ -82,14 +82,14 @@ lies in one Pauli plane (all-Z or all-X, that is, all `x` masks zero or all `z`
 masks zero), so it is simultaneously diagonal as binary parities; it is
 mixed-type when axes mix X and Z (for example some `Y`), so it is not diagonal in
 the computational basis without a further Clifford. Phase B reduces single-type
-blocks directly and mixed-type blocks through a symplectic basis change (see the
-theory doc). The column is kept because the block type still governs which code
-path runs and how much work the reduction takes.
+blocks only; mixed-type blocks are left to Phase A folding (see the theory doc on
+why the exact check needs the single-type case). The column shows how often each
+arises.
 
 | circuit | blocks (>=2) | single-type | mixed-type | largest |
 |---|--:|--:|--:|--:|
 | ccz_complete_6 | 1 | 1 | 0 | 20 |
-| ccz_complete_6_hmixed | 1 | 0 | 1 | 20 |
+| s_empty_4_bellmixed | 1 | 0 | 1 | 15 |
 | ccz_ladder_6 | 1 | 1 | 0 | 20 |
 | toffoli_single | 1 | 0 | 1 | 7 |
 | toffoli_chain_3 | 3 | 0 | 3 | 7 |
@@ -115,27 +115,27 @@ TOHPE is selective, and the block-structure table says why. It fires on dense
 shared cubic structure (`ccz_complete_*`) but not on sparse structure:
 `ccz_ladder_*` and `ccz_star_*` are single-type but, once same-parity folding is
 applied, carry no residual cubic redundancy, so TOHPE returns them unchanged
-(`removed = 0`). The reducer follows Vandaele Algorithm 2: the candidate set is
-the pairwise column XORs together with the single columns, and the move that
-removes the most columns is chosen rather than the first feasible one. On this
-benchmark the pairwise candidates with a first-feasible choice already reach the
-same reductions (a control run confirms `ccz_complete_6` still drops 20 -> 12 and
-`s_empty` still collapses), so the single-column candidates and the objective
-maximization are included for faithfulness to the algorithm and robustness on
-other inputs, not because these numbers depend on them. The `0` on the sparse
-circuits is a property of those polynomials, not a search artifact.
+(`removed = 0`). The reducer follows Vandaele Algorithm 2 (candidate set: the
+pairwise column XORs together with the single columns, choosing the move that
+removes the most columns over the first feasible one), but it accepts a move only
+if it preserves the exact diagonal `f(x) mod 8`. That is stricter than Theorem 1,
+which guarantees the signature tensor only up to a Clifford correction that may
+include quadratic terms; the f-check rejects any move that would need such a
+correction, trading some reductions for a result that is exact with no extra
+bookkeeping. On this benchmark the pairwise candidates with a first-feasible
+choice already reach the same reductions (a control run confirms `ccz_complete_6`
+still drops 20 -> 12 and `s_empty` still collapses), so the single-column
+candidates and the objective maximization are there for faithfulness, not because
+these numbers depend on them. The `0` on the sparse circuits is a property of
+those polynomials, not a search artifact.
 
-Hadamard-bearing circuits become mixed-type, and Phase B handles them. A Toffoli
-is `H; CCZ; H`; once the front end absorbs the Hadamards into `U_C`, the block's
-axes mix Pauli planes (`toffoli_*`, `random_*`, and `*_hmixed` show 0 single-type
-blocks). The mixed-type path diagonalizes such a block in a symplectic generator
-basis, reduces it there, and maps the result back to product Paulis with exact
-signs (theory doc, "Mixed-type blocks"). `ccz_complete_6_hmixed` shows this: a
-fully mixed-type block reduced 20 -> 12 with the statevector preserved exactly.
-The Toffoli rows still show `removed = 0`, not because they are skipped, but
-because a single Toffoli is one CCZ, which is already T-optimal (7 T on three
-qubits, Amy-Maslov-Mosca), and `toffoli_chain_3` is three such independent blocks
-with no shared cubic structure to exploit.
+Hadamard-bearing circuits become mixed-type, and Phase B leaves them to folding.
+A Toffoli is `H; CCZ; H`; once the front end absorbs the Hadamards into `U_C`, the
+block's axes mix Pauli planes (`toffoli_*`, `random_*`, `s_empty_4_bellmixed` show
+0 single-type blocks), so Phase B does not act on them (the single-type scope
+above). Even if it did, a single Toffoli is one CCZ, already T-optimal (7 T on
+three qubits, Amy-Maslov-Mosca), and `toffoli_chain_3` is three such independent
+blocks with no shared cubic structure, so `removed = 0` either way.
 
 Real Toffoli-based circuits behave the same way. `tof_ladder_k` (the tof_n
 compute ladder) and `mcx_k` (compute, Z, uncompute) are Clifford+T members of the
@@ -166,20 +166,20 @@ because they re-synthesise a full circuit.
 
 ## Conclusion: is this worth productionizing?
 
-Conditionally yes, for circuits with cubic phase-polynomial redundancy. Phase B
-reduces ancilla-free T-count on dense diagonal structure (`ccz_complete_6`: 20 ->
-12, 40% beyond peephole) and on its mixed-type Hadamard-conjugate
-(`ccz_complete_6_hmixed`, the same 8 gates), the family that shows up in IQP
-sampling, Hamming-weight phasing, and diagonal phase oracles. On sparse
-structure, on random circuits, and on the real `cultivation_d5` circuit it
-matches peephole, so it should stay opt-in rather than default: a user targeting
-structured circuits can enable it for a reduction, while a user on generic
-near-Clifford workloads pays nothing by leaving it off.
+Conditionally yes, for single-type diagonal phase-polynomial structure. Phase B
+reduces ancilla-free T-count on dense diagonal blocks (`ccz_complete_6`: 20 -> 12,
+40% beyond peephole; `s_empty`: 15 -> 0), the family that shows up in IQP
+sampling, Hamming-weight phasing, and diagonal phase oracles. On sparse structure,
+on random circuits, on Toffoli-based arithmetic, and on the real `cultivation_d5`
+circuit it matches peephole, so it should stay opt-in rather than default: a user
+targeting diagonal-heavy circuits can enable it for a reduction, while a user on
+generic near-Clifford workloads pays nothing by leaving it off.
 
-Both block types are handled. Single-Pauli-type blocks are reduced directly, and
-mixed-type (Hadamard-absorbed) blocks are reduced through a symplectic basis
-change entirely within the HIR, so the single-type restriction noted in earlier
-revisions is gone. The remaining follow-ups are:
+Scope is single-Pauli-type blocks, where `f(x) mod 8` is the exact unitary and a
+move can be accepted with an exact check. Mixed-X/Z blocks (Hadamard-absorbed
+Toffolis) are left to folding; reducing them needs the quadratic-Clifford and
+global-phase tracking discussed in the theory doc, which is future work. The
+remaining follow-ups are:
 
 1. FastTODD (Vandaele Theorem 6) in place of TOHPE (Theorem 1), which can find
    marginally more reductions per block.

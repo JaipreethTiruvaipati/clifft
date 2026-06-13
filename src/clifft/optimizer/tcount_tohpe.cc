@@ -156,6 +156,13 @@ TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, siz
     if (verifiable)
         f_target = phase_function(original, {}, n_bits);
 
+    // `max_cols` bounds the number of odd-coefficient parities (columns) the
+    // reducer will attempt. Each outer iteration scans O(m^2) candidate update
+    // vectors z, and for each a null-space basis of an O(n_bits^2)-row system,
+    // running a properize (O(m^2)) and, when a move beats the current best, one
+    // O(2^n_bits) phase-function check. So the search is polynomial in m but with
+    // a large constant; the cap keeps it bounded for the small localized blocks
+    // the front end produces, and returns larger blocks unchanged.
     if (columns.size() > max_cols || !verifiable) {
         result.columns = std::move(columns);
         result.t_after = result.columns.size();
@@ -167,7 +174,8 @@ TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, siz
 
     const uint32_t mw_n = words_for(n_bits);
 
-    // Duplicate-and-destroy loop (Vandaele Algorithm 2 / Theorem 1).
+    // Duplicate-and-destroy loop (Vandaele Algorithm 2 / Theorem 1). Columns only
+    // decrease, so the loop terminates; the guard is a backstop.
     bool progress = true;
     int guard = 0;
     while (progress && guard++ < 4096) {

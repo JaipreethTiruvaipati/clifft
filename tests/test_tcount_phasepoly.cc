@@ -336,31 +336,26 @@ TEST_CASE("PhasePoly TOHPE: dense CCZ-complete block reduces beyond peephole, ex
     REQUIRE(hir_phase_fn(hir, 6) == f_before);  // exact diagonal unitary
 }
 
-TEST_CASE("PhasePoly TOHPE: mixed-type (Hadamard-conjugated) block reduces, exact",
-          "[tcount][tohpe]") {
-    // ccz_complete_6 conjugated by H on {0,1,2}: parities touching those qubits
-    // rotate into the X plane, so the commuting block is MIXED-type (not all-Z
-    // or all-X). The mixed-type path diagonalizes it in a symplectic basis and
-    // still reduces it, exactly -- the genuinely non-diagonal check the
-    // dense-CCZ test (whose input state is a |0> eigenstate) cannot make.
+TEST_CASE("PhasePoly TOHPE: mixed-type blocks are left untouched and exact", "[tcount][tohpe]") {
+    // Phase B reduces only single-Pauli-type (diagonal) blocks, where f(x) mod 8
+    // is the exact unitary. A block whose axes mix X and Z -- here s_empty
+    // conjugated by a Clifford -- must be left for plain folding; reducing it
+    // would need quadratic-Clifford / global-phase tracking the f-check does not
+    // provide. This pins the regression a bell-mixed conjugation exposed.
     std::string inner;
-    for (int a = 0; a < 6; ++a)
-        for (int b = a + 1; b < 6; ++b)
-            for (int c = b + 1; c < 6; ++c)
-                inner += ccz_str(a, b, c);
-    const std::string h = "H 0\nH 1\nH 2\n";
-    const std::string text = h + inner + h;
+    for (uint32_t a = 1; a < 16; ++a)
+        inner += t_on_parity(a, 4);  // s_empty(4): trivial diagonal phase
 
-    size_t t0 = hir_from(text.c_str()).num_t_gates();
-    auto hir = hir_from(text.c_str());
-    TCountPhasePolyPass pass;
-    pass.run(hir);
+    const std::string h_only = "H 0\n" + inner + "H 0\n";
+    const std::string bell = "CX 0 1\nH 0\n" + inner + "H 0\nCX 0 1\n";
 
-    INFO("t0=" << t0 << " t_after=" << hir.num_t_gates()
-               << " tohpe_removed=" << pass.tohpe_removed());
-    REQUIRE(pass.tohpe_removed() > 0);  // the mixed-type path fired
-    REQUIRE(hir.num_t_gates() < t0);    // and reduced
-    require_equiv(text.c_str());        // exact statevector, incl. global phase
+    for (const auto& text : {h_only, bell}) {
+        auto hir = hir_from(text.c_str());
+        TCountPhasePolyPass pass;
+        pass.run(hir);
+        REQUIRE(pass.tohpe_removed() == 0);  // mixed block skipped, not reduced
+        require_equiv(text.c_str());         // unitary preserved exactly
+    }
 }
 
 // Every source line referenced by the current mapping, as a flat list.

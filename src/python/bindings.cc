@@ -505,11 +505,11 @@ NB_MODULE(_clifft_core, m) {
 
     nb::class_<clifft::TCountPhasePolyPass, clifft::HirPass>(
         m, "TCountPhasePolyPass",
-        "Experimental, opt-in phase-polynomial T-count pass. Folds per-axis\n"
-        "rotation coefficients (mod 8) within maximal commuting T_GATE blocks\n"
-        "and re-emits the minimal representation. Exactly semantics-preserving;\n"
-        "not in the default pass list. Exposes analyzer metrics for evaluating\n"
-        "the multi-axis (TODD) opportunity that the current HIR cannot capture.")
+        "Experimental, opt-in phase-polynomial T-count pass. Within a maximal\n"
+        "commuting T_GATE block it folds per-axis coefficients mod 8 (Phase A) and\n"
+        "runs the TOHPE multi-axis reducer on single-Pauli-type blocks (Phase B),\n"
+        "accepting a move only if it preserves the exact diagonal phase function.\n"
+        "Opt-in, not in the default pass list. Exposes analyzer metrics.")
         .def(nb::init<bool, uint32_t>(), nb::arg("enable_tohpe") = true,
              nb::arg("max_verify_bits") = 14)
         .def_prop_ro("blocks", &clifft::TCountPhasePolyPass::blocks)

@@ -121,17 +121,6 @@ static std::string ccz_star(int k) {
     return s;
 }
 
-// Conjugate a circuit by a layer of Hadamards on `qs`. Conjugating a diagonal
-// (Z-type) phase polynomial this way rotates the parities that touch those
-// qubits into the X plane, making the commuting block MIXED-type while
-// preserving its reduction structure -- the test bed for the mixed-type path.
-static std::string h_conjugate(const std::string& inner, const std::vector<int>& qs) {
-    std::string h;
-    for (int q : qs)
-        h += "H " + std::to_string(q) + "\n";
-    return h + inner + h;
-}
-
 // --- Real-world Toffoli-based circuits (op-T-mize / Amy benchmark family) -----
 // These are Clifford+T after the standard 7-T Toffoli decomposition, exactly the
 // regime the op-T-mize T-count benchmarks live in (tof_n, mcx, arithmetic).
@@ -317,7 +306,9 @@ int main() {
     circuits.push_back({"ccz_complete_6", ccz_complete(6), 6});
     circuits.push_back({"ccz_star_5", ccz_star(5), 7});
     circuits.push_back({"ccz_star_8", ccz_star(8), 10});
-    circuits.push_back({"ccz_complete_6_hmixed", h_conjugate(ccz_complete(6), {0, 1, 2}), 6});
+    // s_empty(4) under an entangling Clifford context: a mixed-type block, which
+    // Phase B must leave untouched (regression for the exact-amplitude check).
+    circuits.push_back({"s_empty_4_bellmixed", "CX 0 1\nH 0\n" + s_empty(4) + "H 0\nCX 0 1\n", 4});
     circuits.push_back({"s_empty_4", s_empty(4), 4});
     circuits.push_back({"s_empty_5", s_empty(5), 5});
     circuits.push_back({"s_empty_4_minus_full", s_empty(4, true), 4});

@@ -136,35 +136,23 @@ validates the emitted `T_GATE` + `PHASE_ROTATION` set against the original phase
 function, so the re-emission is verified regardless of when the residual is
 absorbed.
 
-### Mixed-type blocks: reduction in a symplectic basis
+### Scope: single-Pauli-type blocks only
 
-A commuting block whose axes are all Z-type (or all X-type) is already a parity
-table, and Phase B acts on it directly. A block whose axes mix the X and Z planes
-is not a parity table in the computational basis. This is what a Hadamard-absorbed
-Toffoli produces, since $H\,\text{CCZ}\,H$ leaves Y-bearing axes once the frame
-absorbs the Hadamards. The block is still simultaneously diagonal, just in a
-different basis, and TOHPE applies after a change of coordinates:
+Phase B runs only on blocks whose axes are all Z-type (or all X-type). There the
+diagonal phase function $f(x) \bmod 8$ over the computational basis *is* the
+unitary, so checking it before accepting a move pins the result down exactly,
+global phase included.
 
-* The axes pairwise commute, so on symplectic vectors $v_k = (x_k \mathbin\| z_k)
-  \in \mathbb{F}_2^{2n}$ they span a subspace. A GF(2) basis $\{g_1,\dots,g_r\}$
-  of that subspace, chosen from the axes themselves, is a set of independent,
-  pairwise-commuting Pauli generators.
-* Each axis is a GF(2) combination of the generators; that combination is its
-  coordinate $c_k \in \mathbb{F}_2^{r}$, a Z-type parity in the joint eigenbasis
-  of the $g_i$ (where $g_i$ has eigenvalue $(-1)^{y_i}$ and the axis has
-  eigenvalue $(-1)^{c_k\cdot y}$). TOHPE runs unchanged on those coordinates.
-* A reduced coordinate maps back to the product $\prod_i g_i^{c_i}$, whose mask
-  is the generator XOR and whose sign is the signed-Pauli product computed by
-  Stim (the generators commute, so the accumulated $i$-power is even and the
-  product is a $\pm$ Pauli). That signed product carries the eigenvalue
-  $(-1)^{c\cdot y}$ the coordinate-space phase function certified, so it is
-  emitted with its sign intact; a $-1$ is folded into the rotation coefficient.
-
-No diagonalizing Clifford is materialized and no qubit is added: the basis is
-used only to read coordinates and to rebuild Paulis, so the mixed-type path
-respects the same structural constraints. It is checked by an exact statevector
-equivalence test on a Hadamard-conjugated dense-CCZ block (a non-diagonal
-unitary), in addition to the coordinate-space `f(x) mod 8` check.
+A block whose axes mix the X and Z planes (for example a Hadamard-absorbed
+Toffoli, which leaves $Y$-bearing axes once the frame absorbs the Hadamards) is
+diagonal only in some other basis. Reducing it correctly would mean tracking the
+Clifford correction Theorem 1 leaves behind under that change of basis, which can
+include quadratic ($CZ$) terms and a global phase. A coordinate-space $f$ check
+is not enough on its own: two operators can agree on the coordinate-space phase
+function yet differ by a global phase on the physical qubits, so a move can pass
+that check and still change the unitary. Until Phase B carries an exact
+physical-space check for this case, it leaves mixed-type blocks to Phase A
+folding. Extending it is future work.
 
 ## The ancilla-free ceiling
 
