@@ -12,6 +12,7 @@
 #include "test_helpers.h"
 
 #include <algorithm>
+#include <bit>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cmath>
@@ -191,9 +192,8 @@ TEST_CASE("PhasePoly: statevector preserved with interleaved different axes", "[
 }
 
 // =============================================================================
-// Phase B (TOHPE) end-to-end: a real multi-axis reduction with the diagonal
-// unitary verified exactly. This is the evidence the issue asks for -- TOHPE
-// removing T gates that phase folding / peephole cannot, semantics preserved.
+// Phase B (TOHPE) end-to-end: a multi-axis reduction that removes T gates phase
+// folding cannot, with the diagonal unitary verified exactly.
 // =============================================================================
 
 // "T on Z-parity a" (a's set bits), computed onto the lowest support qubit by a
@@ -231,7 +231,7 @@ static std::vector<int> hir_phase_fn(const HirModule& hir, int nq) {
         REQUIRE(!hir.sign(op));
         uint64_t parity = hir.stab_mask(op).words[0];
         for (int x = 0; x < (1 << nq); ++x) {
-            int bit = static_cast<int>(__builtin_popcountll(parity & static_cast<uint64_t>(x)) & 1);
+            int bit = static_cast<int>(std::popcount(parity & static_cast<uint64_t>(x)) & 1);
             f[x] = (((f[x] + coeff * bit) % 8) + 8) % 8;
         }
     }
@@ -273,7 +273,7 @@ TEST_CASE("PhasePoly TOHPE: 14-parity block collapses to one T, diagonal preserv
     auto f_before = hir_phase_fn(hir, 4);
     // Confirm the target is the nontrivial single-T_dag phase.
     for (int x = 0; x < 16; ++x) {
-        int p = __builtin_popcount(x & 0xF) & 1;
+        int p = std::popcount(static_cast<unsigned>(x & 0xF)) & 1;
         REQUIRE(f_before[x] == (p ? 7 : 0));
     }
 

@@ -7,9 +7,10 @@ Two verification strategies, mirroring test_peephole_oracle.py:
 2. Structural: the pass folds per-axis T coefficients in Z_8 and reports
    analyzer metrics; we check the metrics and the known algebraic identities.
 
-We also pin down the central finding of issue #40: within a commuting block
-this pass reaches the same per-block optimum that PeepholeFusionPass already
-reaches, so running it after peephole removes nothing further.
+Phase A folding alone reaches the same per-block optimum PeepholeFusionPass
+already reaches, so after peephole it removes nothing further. Phase B (TOHPE)
+goes below that on single-type diagonal blocks with cubic redundancy: see
+TestTohpe, where s_empty collapses to 0 T.
 """
 
 import numpy as np

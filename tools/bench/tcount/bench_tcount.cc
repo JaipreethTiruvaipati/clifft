@@ -19,6 +19,7 @@
 #include "clifft/optimizer/tcount_phasepoly_pass.h"
 #include "clifft/svm/svm.h"
 
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -304,6 +305,22 @@ int main() {
     circuits.push_back({"ccz_complete_4", ccz_complete(4), 4});
     circuits.push_back({"ccz_complete_5", ccz_complete(5), 5});
     circuits.push_back({"ccz_complete_6", ccz_complete(6), 6});
+    // ccz_complete_7..14 stress the reducer on increasingly wide single-type
+    // blocks (63, 64, 120, 120, 231, 232, 364, 364 parities). With Algorithm 2's
+    // O(m^2) per-null-vector S(z) scoring (across cores) these finish in well
+    // under a second up to ~80 s (see TOHPE-time_ms) and reduce substantially
+    // (ccz_complete_13: 364 -> 150, ccz_complete_14: 364 -> 216), where the
+    // earlier per-trial properize scan did not finish past width ~63. k=14 is the
+    // ceiling of the exact-f verifiable range (n <= 14); the 364-wide blocks need
+    // the reducer's 384 width cap, comfortably above any real front-end block.
+    circuits.push_back({"ccz_complete_7", ccz_complete(7), 7});
+    circuits.push_back({"ccz_complete_8", ccz_complete(8), 8});
+    circuits.push_back({"ccz_complete_9", ccz_complete(9), 9});
+    circuits.push_back({"ccz_complete_10", ccz_complete(10), 10});
+    circuits.push_back({"ccz_complete_11", ccz_complete(11), 11});
+    circuits.push_back({"ccz_complete_12", ccz_complete(12), 12});
+    circuits.push_back({"ccz_complete_13", ccz_complete(13), 13});
+    circuits.push_back({"ccz_complete_14", ccz_complete(14), 14});
     circuits.push_back({"ccz_star_5", ccz_star(5), 7});
     circuits.push_back({"ccz_star_8", ccz_star(8), 10});
     // s_empty(4) under an entangling Clifford context: a mixed-type block, which
@@ -335,17 +352,22 @@ int main() {
 
     std::cout << "## Per-phase T-count (ancilla-free)\n\n";
     std::cout << "| circuit | n | no-opt | peephole | +foldA | +TOHPE | TOHPE-removed | "
-                 "tohpe-blocks | equiv |\n";
-    std::cout << "|---|--:|--:|--:|--:|--:|--:|--:|:-:|\n";
+                 "tohpe-blocks | TOHPE-time_ms | equiv |\n";
+    std::cout << "|---|--:|--:|--:|--:|--:|--:|--:|--:|:-:|\n";
     for (auto& c : circuits) {
         size_t removed = 0, tblk = 0;
         size_t t0 = t_after(c.text, false, false, false);
         size_t tp = t_after(c.text, true, false, false);
         size_t tf = t_after(c.text, true, true, false);
+        auto t_start = std::chrono::steady_clock::now();
         size_t tt = t_after(c.text, true, true, true, &removed, &tblk);
+        double tohpe_ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start)
+                .count();
         bool eq = statevector_equiv(c.text, c.nq);
         std::cout << "| " << c.name << " | " << c.nq << " | " << t0 << " | " << tp << " | " << tf
-                  << " | " << tt << " | " << removed << " | " << tblk << " | "
+                  << " | " << tt << " | " << removed << " | " << tblk << " | " << std::fixed
+                  << std::setprecision(1) << tohpe_ms << std::defaultfloat << " | "
                   << (c.nq <= 10 ? (eq ? "OK" : "FAIL") : "n/a") << " |\n";
     }
 

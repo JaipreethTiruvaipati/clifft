@@ -70,7 +70,7 @@ struct TohpeResult {
 // blocks above the cap are returned unchanged). `max_verify_bits` caps the
 // 2^n_bits exact-phase-function check: wider blocks are returned unchanged
 // rather than reduced unverified.
-TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, size_t max_cols = 256,
+TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, size_t max_cols = 384,
                          uint32_t max_verify_bits = 14);
 
 }  // namespace clifft

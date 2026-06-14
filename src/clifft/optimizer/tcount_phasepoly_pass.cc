@@ -118,7 +118,7 @@ std::vector<uint64_t> col_to_zmask(const ParityColumn& c, const std::vector<uint
     return z;
 }
 
-// Phase B: TOHPE multi-axis reduction on a single Z-only commuting block.
+// Phase B: TOHPE multi-axis reduction on a single-Pauli-type commuting block.
 // `folded` carries the per-axis folded coefficients (Phase A). Returns true and
 // rewrites the block's op slots if a genuine multi-axis reduction was found and
 // verified; returns false to fall back to plain folding.
@@ -200,7 +200,12 @@ bool apply_tohpe(HirModule& hir, const std::vector<FoldedGroup>& folded,
         }
     }
 
-    TohpeResult res = tohpe_reduce(cols, s, 256, max_verify_bits);
+    // Width cap on the reducer. Algorithm 2's O(m^2)-per-null-vector scoring is
+    // fast enough to cover the whole verifiable range (a single-type block has
+    // n <= max_verify_bits <= 14, e.g. the 364-wide ccz_complete_14, reduced in
+    // ~a minute); wider blocks are returned unchanged. Real front-end blocks are
+    // far below this, so the cap only bounds dense synthetic inputs.
+    TohpeResult res = tohpe_reduce(cols, s, 384, max_verify_bits);
     if (res.columns.size() >= cols.size())
         return false;  // TOHPE found no reduction; plain folding is enough
 
@@ -328,19 +333,18 @@ void TCountPhasePolyPass::run(HirModule& hir) {
         for (size_t k = i; k < block_end; ++k)
             block_slots.push_back(k);
 
-        // Phase B: TOHPE multi-axis reduction (single- or mixed-type blocks);
+        // Phase B: TOHPE multi-axis reduction on a single-Pauli-type block;
         // otherwise emit the Phase A folding result (at most one T per surviving
         // odd axis).
         if (enable_tohpe_ && apply_tohpe(hir, folded, block_slots, deleted, tohpe_removed_,
                                          t_after_, max_verify_bits_)) {
             ++tohpe_blocks_;
-            // Reattach the whole block's provenance to its first surviving slot.
+            // Each surviving op is a function of the whole block, so reattach the
+            // block's provenance to every one of them.
             if (has_source_map)
                 for (size_t slot : block_slots)
-                    if (!deleted[slot]) {
+                    if (!deleted[slot])
                         hir.source_map[slot] = block_src;
-                        break;
-                    }
         } else {
             for (const auto& fg : folded) {
                 std::vector<OutOp> out = synthesize(fg.c);

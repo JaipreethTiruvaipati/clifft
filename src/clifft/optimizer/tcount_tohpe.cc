@@ -3,7 +3,12 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace clifft {
 
@@ -157,12 +162,12 @@ TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, siz
         f_target = phase_function(original, {}, n_bits);
 
     // `max_cols` bounds the number of odd-coefficient parities (columns) the
-    // reducer will attempt. Each outer iteration scans O(m^2) candidate update
-    // vectors z, and for each a null-space basis of an O(n_bits^2)-row system,
-    // running a properize (O(m^2)) and, when a move beats the current best, one
-    // O(2^n_bits) phase-function check. So the search is polynomial in m but with
-    // a large constant; the cap keeps it bounded for the small localized blocks
-    // the front end produces, and returns larger blocks unchanged.
+    // reducer will attempt. Each outer iteration computes a null-space basis of
+    // an O(n_bits^2)-row system and, per null vector, scores all candidate z in
+    // O(m^2) (the S(z) hash step), then verifies the chosen move with one
+    // O(2^n_bits) phase-function check. That is fast in practice (wide dense
+    // blocks reduce in milliseconds to a few seconds); the cap is a safety bound
+    // for pathological widths, and larger blocks are returned unchanged.
     if (columns.size() > max_cols || !verifiable) {
         result.columns = std::move(columns);
         result.t_after = result.columns.size();
@@ -207,66 +212,105 @@ TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, siz
             return (v[j / 64] >> (j % 64)) & 1ULL;
         };
 
-        // Duplicate-and-destroy (Heyfron-Campbell Lemma III.2; Vandaele Alg. 2).
-        // The candidate set of update vectors z is the pairwise column XORs
-        // together with the single columns: Z = {col_i xor col_j} u {col_i}
-        // (Vandaele Alg. 2, line 2). For each candidate z and each null vector
-        // y, the update A -> A xor z y^T (appending z when |y| is odd, to keep
-        // |y| even per condition C1) preserves the order-3 signature tensor;
-        // properize then destroys the duplicate / zeroed columns. We pick the
-        // move that removes the most columns (the objective maximization of
-        // Alg. 2, rather than the first feasible move), and verify the exact
-        // phase function before committing -- the safety net the signature
-        // tensor alone does not give.
-        std::vector<ParityColumn> z_candidates;
-        z_candidates.reserve(static_cast<size_t>(m) * (m + 1) / 2);
-        for (uint32_t a = 0; a < m; ++a) {
-            z_candidates.push_back(columns[a]);  // single-column z = col_a
-            for (uint32_t b = a + 1; b < m; ++b) {
-                ParityColumn z = columns[a];
-                z.xor_with(columns[b]);
-                z_candidates.push_back(std::move(z));
-            }
-        }
-
-        size_t best_removed = 0;
-        std::vector<ParityColumn> best_cols;
-        std::vector<ResidualPhase> best_res;
-        for (const auto& z : z_candidates) {
-            if (z.is_zero())
-                continue;
-            for (const auto& y : nullspace) {
-                int wy = popcount_words(y);
-                if (wy == 0)
+        // Vandaele Algorithm 2 (TOHPE) scoring, arXiv:2407.08695. For a fixed
+        // null vector y the update A -> A xor z y^T moves every column i with
+        // y_i = 1 to col_i xor z and leaves the others alone, so a moved column i
+        // and an unmoved column j collide -- a destroyable duplicate -- exactly
+        // when z = col_i xor col_j. A hash map tallies, for each candidate z, how
+        // many such collisions it makes (+2 per (moved, unmoved) pair) plus a
+        // seed of 1 for every column a fresh z could duplicate on its own. That
+        // scores all z for this y in O(m^2) -- the S(z) step -- instead of
+        // copying and properizing a trial for every (z, y) pair. We keep each
+        // y's best-scoring z; the loop below applies the best overall that also
+        // preserves the exact phase function.
+        struct Cand {
+            int score;
+            uint64_t z;
+            uint32_t yi;
+        };
+        std::vector<Cand> cands;
+        auto score_y = [&](uint32_t yi, std::unordered_map<uint64_t, int>& score,
+                           std::vector<Cand>& out) {
+            const std::vector<uint64_t>& y = nullspace[yi];
+            int wy = popcount_words(y);
+            if (wy == 0)
+                return;
+            const bool parity = (wy & 1);
+            score.clear();
+            for (uint32_t i = 0; i < m; ++i)
+                if (static_cast<bool>(vbit(y, i)) != parity)
+                    score.emplace(columns[i].words[0], 1);
+            for (uint32_t i = 0; i < m; ++i) {
+                if (!vbit(y, i))
                     continue;
-
-                std::vector<ParityColumn> trial = columns;
                 for (uint32_t j = 0; j < m; ++j)
-                    if (vbit(y, j))
-                        trial[j].xor_with(z);
-                if (wy & 1)
-                    trial.push_back(z);  // keep |y| even (Vandaele C1)
-
-                std::vector<ResidualPhase> trial_res = residuals;
-                properize(trial, trial_res);
-                if (trial.size() >= columns.size())
-                    continue;
-                size_t removed = columns.size() - trial.size();
-                // Verify only when this move could beat the current best, then
-                // accept it as the new best if it preserves the phase function.
-                if (removed > best_removed &&
-                    phase_function(trial, trial_res, n_bits) == f_target) {
-                    best_removed = removed;
-                    best_cols = std::move(trial);
-                    best_res = std::move(trial_res);
-                }
+                    if (!vbit(y, j))
+                        score[columns[i].words[0] ^ columns[j].words[0]] += 2;
             }
+            int best = 0;
+            uint64_t bz = 0;
+            bool has = false;
+            for (const auto& [zv, sc] : score)
+                if (sc > best || (sc == best && has && zv < bz)) {
+                    best = sc;
+                    bz = zv;
+                    has = true;
+                }
+            if (has && best > 0)
+                out.push_back({best, bz, yi});
+        };
+        const int64_t ny = static_cast<int64_t>(nullspace.size());
+#ifdef _OPENMP
+#pragma omp parallel
+        {
+            std::vector<Cand> local;
+            std::unordered_map<uint64_t, int> score;
+#pragma omp for schedule(dynamic, 4) nowait
+            for (int64_t yi = 0; yi < ny; ++yi)
+                score_y(static_cast<uint32_t>(yi), score, local);
+#pragma omp critical
+            cands.insert(cands.end(), local.begin(), local.end());
         }
+#else
+        {
+            std::unordered_map<uint64_t, int> score;
+            for (int64_t yi = 0; yi < ny; ++yi)
+                score_y(static_cast<uint32_t>(yi), score, cands);
+        }
+#endif
 
-        if (best_removed > 0) {
-            columns.swap(best_cols);
-            residuals.swap(best_res);
-            progress = true;
+        // Apply the best-scoring move that strictly reduces and preserves the
+        // exact phase function. The signature-preserving update can still shift f
+        // by a Clifford term this residual model cannot express, so such moves
+        // are rejected and we fall through to the next candidate. Ties broken by
+        // (z, y) index so the choice is deterministic across thread counts.
+        std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) {
+            if (a.score != b.score)
+                return a.score > b.score;
+            if (a.z != b.z)
+                return a.z < b.z;
+            return a.yi < b.yi;
+        });
+        for (const Cand& c : cands) {
+            const std::vector<uint64_t>& y = nullspace[c.yi];
+            ParityColumn z{std::vector<uint64_t>(mw_n, 0)};
+            z.words[0] = c.z;
+            std::vector<ParityColumn> trial = columns;
+            for (uint32_t j = 0; j < m; ++j)
+                if (vbit(y, j))
+                    trial[j].xor_with(z);
+            if (popcount_words(y) & 1)
+                trial.push_back(z);  // keep |y| even (Vandaele C1)
+            if (phase_function(trial, residuals, n_bits) != f_target)
+                continue;
+            std::vector<ResidualPhase> trial_res = residuals;
+            properize(trial, trial_res);
+            if (trial.size() < columns.size()) {
+                columns.swap(trial);
+                residuals.swap(trial_res);
+                progress = true;
+                break;
+            }
         }
     }
 
@@ -281,7 +325,6 @@ TohpeResult tohpe_reduce(std::vector<ParityColumn> columns, uint32_t n_bits, siz
     result.columns = std::move(columns);
     result.residuals = std::move(residuals);
     result.t_after = result.columns.size();
-    (void)mw_n;
     return result;
 }
 

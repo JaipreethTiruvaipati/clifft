@@ -2,6 +2,7 @@
 
 #include "clifft/optimizer/tcount_tohpe.h"
 
+#include <bit>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <vector>
@@ -20,10 +21,9 @@ static std::vector<int> phase_fn(const std::vector<ParityColumn>& cols,
     for (uint64_t x = 0; x < (1ULL << n_bits); ++x) {
         int acc = 0;
         for (auto& c : cols)
-            acc += static_cast<int>(__builtin_popcountll(c.words[0] & x) & 1ULL);
+            acc += static_cast<int>(std::popcount(c.words[0] & x) & 1ULL);
         for (auto& r : res)
-            acc +=
-                r.coeff_mod8 * static_cast<int>(__builtin_popcountll(r.parity.words[0] & x) & 1ULL);
+            acc += r.coeff_mod8 * static_cast<int>(std::popcount(r.parity.words[0] & x) & 1ULL);
         f[x] = ((acc % 8) + 8) % 8;
     }
     return f;

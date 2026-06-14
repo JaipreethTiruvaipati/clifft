@@ -1,7 +1,7 @@
 # Global T-count Reduction in the Heisenberg IR
 
 This page is the theory companion for the experimental, opt-in
-`PhasePolyTCountPass` (issue #40). It states the optimization problem, the prior
+`TCountPhasePolyPass` (issue #40). It states the optimization problem, the prior
 work it builds on, and why the technique is valid on Clifft's HIR without
 changing the parser, HIR layout, bytecode, or VM.
 
@@ -95,11 +95,32 @@ $A \to A \oplus z\,y^{T}$ that preserves the signature tensor exactly when
 
 where $|\cdot|$ is Hamming weight and $\wedge$ is bitwise AND. The candidate
 update vectors are $z \in \{\,c_i \oplus c_j\,\} \cup \{\,c_i\,\}$: the pairwise
-column XORs and the single columns (Vandaele Algorithm 2, line 2). This PR
-implements both and picks the move that removes the most columns rather than the
-first feasible one. A valid $(z, y)$ makes two columns duplicates (or zeroes
-one); destroying them removes T gates while leaving the unitary unchanged up to a
-Clifford (Vandaele Theorem 2, subadditivity).
+column XORs and the single columns (Vandaele Algorithm 2, line 2). A valid
+$(z, y)$ makes two columns duplicates (or zeroes one); destroying them removes T
+gates while leaving the unitary unchanged up to a Clifford (Vandaele Theorem 2,
+subadditivity).
+
+This follows Algorithm 2's inner loop. For a fixed null vector $y$, the update
+$A \mapsto A \oplus z y^\top$ moves every column $i$ with $y_i = 1$ to
+$c_i \oplus z$ and leaves the rest, so a moved column $i$ and an unmoved column
+$j$ collide -- a destroyable duplicate -- exactly when $z = c_i \oplus c_j$. A
+hash map tallies, for every candidate $z$, how many such collisions it makes (the
+$S(z)$ step), which scores all $z$ for that $y$ in $O(m^2)$ with no per-candidate
+properize; the top-scoring $z$ is that null vector's best move. The scoring is
+split across cores, one null vector per task. The one simplification from the
+reference is that the null space is recomputed each outer step (an $O(n^2 m)$
+Gaussian elimination) rather than maintained incrementally -- cheap next to the
+scoring. The reducer stays fast as blocks widen: dense $\mathrm{CCZ}$-complete
+blocks reduce in a few seconds at ~230 parities and in ~80 s at 364 -- the top of
+the exact-$f$ verifiable range ($n \le 14$) -- see the Performance note in the
+evaluation.
+
+Two further restrictions narrow what is accepted. The reducer runs only on
+single-Pauli-type (diagonal) blocks, and it accepts a move only if it preserves
+the exact diagonal phase function $f(x)\bmod 8$. The latter is stricter than
+Theorem 1, which permits a Clifford correction (possibly quadratic) that the
+$f$-check rejects; this trades some reductions for a result that is exact with no
+extra bookkeeping. Mixed-X/Z blocks are left to Phase A folding.
 
 ### Why this fits Clifft with no structural change
 
@@ -156,12 +177,14 @@ folding. Extending it is future work.
 
 ## The ancilla-free ceiling
 
-Clifft cannot add qubits: the VM allocates exactly `2^{k_max}` amplitudes and the
-Pauli arena is fixed at trace time, so this pass operates in the ancilla-free
-regime. The op-T-mize literature shows that the large T-count reductions (for
-example GF(2^m) multipliers, adders) come disproportionately from Hadamard
-gadgetization with ancillas; ancilla-free, many benchmark circuits see little or
-no reduction (Vandaele 2024, Table 2). Because Clifft has already absorbed the
+This pass adds no qubits, so it works in the ancilla-free regime. That is a
+property of the pass, not of the VM: gadgetization, which trades T gates for
+ancillas and mid-circuit measurement, is a circuit/HIR-level transform that runs
+before lowering, so it would just lower to a different trace with a larger
+`k_max` (no VM change). The op-T-mize literature shows the large T-count
+reductions (for example GF(2^m) multipliers, adders) come disproportionately from
+that gadgetization; ancilla-free, many benchmark circuits see little or no
+reduction (Vandaele 2024, Table 2). And because Clifft has already absorbed the
 Hadamards into `U_C`, consecutive T axes frequently anti-commute, so commuting
 blocks can be small.
 
@@ -169,9 +192,9 @@ Whether HIR-level phase-polynomial reduction is worth productionizing in Clifft
 is therefore an empirical question: it depends on the commuting-block-size
 distribution of the target workloads. The companion benchmark
 (`tools/bench/tcount/`) measures, per circuit and per phase, the T-count under
-no-opt / peephole / +folding / +TOHPE, and the commuting-block-size histogram
-that explains where TOHPE can and cannot fire. See the evaluation summary in the
-pull request for the conclusion.
+no-opt / peephole / +folding / +TOHPE, plus the per-circuit TOHPE runtime and the
+commuting-block-size histogram that explain where TOHPE can and cannot fire. See
+the evaluation doc for the conclusion.
 
 ## References
 

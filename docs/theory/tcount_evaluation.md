@@ -5,7 +5,7 @@ theory and citations are in [tcount.md](tcount.md). All numbers below come from
 `tools/bench/tcount/bench_tcount.cc`, a standalone harness linked against
 `clifft_core`, and are reproducible with:
 
-```
+```text
 cmake --build build --target bench_tcount && ./build/tests/bench_tcount
 ```
 
@@ -34,38 +34,73 @@ core and the end-to-end tests.
 
 ## Results: per-phase T-count (ancilla-free)
 
-Bold rows are where Phase B (TOHPE) removes T gates beyond peephole.
+Bold rows are where Phase B (TOHPE) removes T gates beyond peephole. The table
+is `bench_tcount` output with the per-block-count column dropped for width; the
+T-counts are deterministic, the `time_ms` column is a single-run snapshot of the
+Phase B call and is machine-dependent (8-core box; the first Phase B call also
+pays one-time OpenMP thread-pool startup).
 
-| circuit | n | no-opt | peephole | +foldA | +TOHPE | TOHPE removed | equiv |
-|---|--:|--:|--:|--:|--:|--:|:-:|
-| ccz_single | 3 | 7 | 7 | 7 | 7 | 0 | OK |
-| ccz_ladder_2 | 4 | 14 | 8 | 8 | 8 | 0 | OK |
-| ccz_ladder_6 | 8 | 42 | 20 | 20 | 20 | 0 | OK |
-| ccz_ladder_10 | 12 | 70 | 32 | 32 | 32 | 0 | n/a |
-| **ccz_complete_4** | 4 | 28 | 8 | 8 | **7** | **1** | OK |
-| ccz_complete_5 | 5 | 70 | 20 | 20 | 20 | 0 | OK |
-| **ccz_complete_6** | 6 | 140 | 20 | 20 | **12** | **8** | OK |
-| ccz_star_5 | 7 | 35 | 23 | 23 | 23 | 0 | OK |
-| ccz_star_8 | 10 | 56 | 32 | 32 | 32 | 0 | OK |
-| **s_empty_4** | 4 | 15 | 15 | 15 | **0** | **15** | OK |
-| **s_empty_5** | 5 | 31 | 31 | 31 | **0** | **31** | OK |
-| **s_empty_4_minus_full** | 4 | 14 | 14 | 14 | **1** | **13** | OK |
-| s_empty_4_bellmixed | 4 | 15 | 15 | 15 | 15 | 0 | OK |
-| toffoli_single | 3 | 7 | 7 | 7 | 7 | 0 | OK |
-| toffoli_chain_3 | 5 | 21 | 17 | 17 | 17 | 0 | OK |
-| tof_ladder_3 | 5 | 14 | 14 | 14 | 14 | 0 | OK |
-| tof_ladder_5 | 9 | 28 | 28 | 28 | 28 | 0 | OK |
-| mcx_3 | 5 | 28 | 8 | 8 | 8 | 0 | OK |
-| mcx_4 | 7 | 42 | 16 | 16 | 16 | 0 | OK |
-| random_6q_d120 | 6 | 34 | 14 | 14 | 14 | 0 | OK |
-| random_8q_d200 | 8 | 50 | 22 | 22 | 22 | 0 | OK |
-| **cultivation_d5** (real) | 26 | 72 | 72 | 72 | 72 | 0 | n/a |
+| circuit | n | no-opt | peephole | +foldA | +TOHPE | removed | time_ms | equiv |
+| --- | --: | --: | --: | --: | --: | --: | --: | :-: |
+| ccz_single | 3 | 7 | 7 | 7 | 7 | 0 | 0.3 | OK |
+| ccz_ladder_2 | 4 | 14 | 8 | 8 | 8 | 0 | 0.3 | OK |
+| ccz_ladder_3 | 5 | 21 | 11 | 11 | 11 | 0 | 0.5 | OK |
+| ccz_ladder_4 | 6 | 28 | 14 | 14 | 14 | 0 | 2.0 | OK |
+| ccz_ladder_6 | 8 | 42 | 20 | 20 | 20 | 0 | 1.5 | OK |
+| ccz_ladder_10 | 12 | 70 | 32 | 32 | 32 | 0 | 11.9 | n/a |
+| **ccz_complete_4** | 4 | 28 | 8 | 8 | **7** | **1** | 8.2 | OK |
+| ccz_complete_5 | 5 | 70 | 20 | 20 | 20 | 0 | 10.3 | OK |
+| **ccz_complete_6** | 6 | 140 | 20 | 20 | **12** | **8** | 15.0 | OK |
+| **ccz_complete_7** | 7 | 245 | 63 | 63 | **21** | **42** | 34.8 | OK |
+| **ccz_complete_8** | 8 | 392 | 64 | 64 | **22** | **42** | 54.5 | OK |
+| **ccz_complete_9** | 9 | 588 | 120 | 120 | **44** | **76** | 216.8 | OK |
+| **ccz_complete_10** | 10 | 840 | 120 | 120 | **36** | **84** | 541.7 | OK |
+| **ccz_complete_11** | 11 | 1155 | 231 | 231 | **85** | **146** | 3705.4 | n/a |
+| **ccz_complete_12** | 12 | 1540 | 232 | 232 | **80** | **152** | 7861.0 | n/a |
+| **ccz_complete_13** | 13 | 2002 | 364 | 364 | **150** | **214** | 78948.0 | n/a |
+| **ccz_complete_14** | 14 | 2548 | 364 | 364 | **216** | **148** | 81014.7 | n/a |
+| ccz_star_5 | 7 | 35 | 23 | 23 | 23 | 0 | 1.6 | OK |
+| ccz_star_8 | 10 | 56 | 32 | 32 | 32 | 0 | 36.5 | OK |
+| s_empty_4_bellmixed | 4 | 15 | 15 | 15 | 15 | 0 | 0.3 | OK |
+| **s_empty_4** | 4 | 15 | 15 | 15 | **0** | **15** | 1.5 | OK |
+| **s_empty_5** | 5 | 31 | 31 | 31 | **0** | **31** | 1.4 | OK |
+| **s_empty_4_minus_full** | 4 | 14 | 14 | 14 | **1** | **13** | 0.4 | OK |
+| toffoli_single | 3 | 7 | 7 | 7 | 7 | 0 | 0.1 | OK |
+| toffoli_chain_3 | 5 | 21 | 17 | 17 | 17 | 0 | 0.4 | OK |
+| tof_ladder_3 | 5 | 14 | 14 | 14 | 14 | 0 | 0.2 | OK |
+| tof_ladder_4 | 7 | 21 | 21 | 21 | 21 | 0 | 0.3 | OK |
+| tof_ladder_5 | 9 | 28 | 28 | 28 | 28 | 0 | 0.4 | OK |
+| mcx_3 | 5 | 28 | 8 | 8 | 8 | 0 | 0.5 | OK |
+| mcx_4 | 7 | 42 | 16 | 16 | 16 | 0 | 0.8 | OK |
+| random_6q_d120 | 6 | 34 | 14 | 14 | 14 | 0 | 5.7 | OK |
+| random_8q_d200 | 8 | 50 | 22 | 22 | 22 | 0 | 1.8 | OK |
+| cultivation_d5 (real) | 26 | 72 | 72 | 72 | 72 | 0 | 32.7 | n/a |
 
 `ccz_complete_k` is all $\binom{k}{3}$ CCZ gates on $k$ qubits, a dense diagonal
-phase polynomial. On `ccz_complete_6` TOHPE removes 8 of 20 T gates (40%) that
-peephole could not, and the reduction is verified exact: the test `PhasePoly
-TOHPE: dense CCZ-complete block reduces beyond peephole, exact` checks that the
-full diagonal $f(x)\bmod 8$ is preserved.
+phase polynomial, and the family that stresses the reducer hardest. The whole
+range reduces: 6 drops 20 -> 12, 7 drops 63 -> 21, 8 drops 64 -> 22, 9 drops
+120 -> 44, 10 drops 120 -> 36, 11 drops 231 -> 85, 12 drops 232 -> 80, 13 drops
+364 -> 150, and 14 drops 364 -> 216. ($k = 14$, $n = 14$, is the top of the
+exact-$f$ verifiable range; wider $n$ is returned unchanged.) Each is verified
+exact against the full diagonal $f(x)\bmod 8$ (and against the dense statevector
+for $n \le 10$, the `OK` column).
+
+### Performance
+
+The search is Algorithm 2's $S(z)$ scoring (theory doc): per null vector, a hash
+map scores every candidate $z$ in $O(m^2)$ by how many columns it duplicates, the
+scoring is split across cores, and the exact $f$ check fires once on the chosen
+move. This holds up as blocks widen. In `time_ms`, `ccz_complete_7` (63 columns)
+reduces 63 -> 21 in ~35 ms (it was ~20 s under the earlier per-trial-properize
+scan), and the previously infeasible wide blocks now finish: `ccz_complete_9/10`
+(120 columns) in ~0.2-0.5 s, `ccz_complete_11` (231 columns) in ~3.7 s,
+`ccz_complete_12` (232 columns) in ~8 s, and the widest verifiable blocks
+`ccz_complete_13/14` (364 columns) in ~80 s, reducing 364 -> 150 and 364 -> 216.
+The localized blocks the front end actually emits are sub-millisecond to a few
+milliseconds. The `max_cols` width cap is 384, raised from the slow scan's
+conservative 256 now that the search is fast enough to cover the whole exact-$f$
+verifiable range ($n \le 14$, i.e. up to the 364-wide `ccz_complete_14` in
+~80 s); blocks past the cap are returned unchanged.
 
 `s_empty_4_bellmixed` is the same inner `s_empty(4)` wrapped in an entangling
 Clifford (`CX 0 1; H 0; ... ; H 0; CX 0 1`). That makes the commuting block
@@ -87,8 +122,13 @@ why the exact check needs the single-type case). The column shows how often each
 arises.
 
 | circuit | blocks (>=2) | single-type | mixed-type | largest |
-|---|--:|--:|--:|--:|
+| --- | --: | --: | --: | --: |
 | ccz_complete_6 | 1 | 1 | 0 | 20 |
+| ccz_complete_7 | 1 | 1 | 0 | 63 |
+| ccz_complete_8 | 1 | 1 | 0 | 64 |
+| ccz_complete_10 | 1 | 1 | 0 | 120 |
+| ccz_complete_12 | 1 | 1 | 0 | 232 |
+| ccz_complete_14 | 1 | 1 | 0 | 364 |
 | s_empty_4_bellmixed | 1 | 0 | 1 | 15 |
 | ccz_ladder_6 | 1 | 1 | 0 | 20 |
 | toffoli_single | 1 | 0 | 1 | 7 |
@@ -108,26 +148,24 @@ not itself a source of reduction.
 Phase B (TOHPE) reduces ancilla-free T-count where the block carries cubic
 redundancy. It removes T gates folding cannot: `s_empty_4/5` collapse 15/31 -> 0
 (Amy-Maslov-Mosca trivial polynomials), `s_empty_4_minus_full` 14 -> 1 (one
-`T_dag`), and the dense diagonal `ccz_complete_6` drops 20 -> 12. Every accepted
-move is checked against the full `f(x) mod 8`, so these are exact.
+`T_dag`), and the dense diagonal `ccz_complete_k` family drops all the way from
+`k = 6` (20 -> 12) up to `k = 14` (364 -> 216). Every accepted move is checked
+against the full `f(x) mod 8`, so these are exact.
 
 TOHPE is selective, and the block-structure table says why. It fires on dense
 shared cubic structure (`ccz_complete_*`) but not on sparse structure:
 `ccz_ladder_*` and `ccz_star_*` are single-type but, once same-parity folding is
 applied, carry no residual cubic redundancy, so TOHPE returns them unchanged
-(`removed = 0`). The reducer follows Vandaele Algorithm 2 (candidate set: the
-pairwise column XORs together with the single columns, choosing the move that
-removes the most columns over the first feasible one), but it accepts a move only
-if it preserves the exact diagonal `f(x) mod 8`. That is stricter than Theorem 1,
-which guarantees the signature tensor only up to a Clifford correction that may
-include quadratic terms; the f-check rejects any move that would need such a
-correction, trading some reductions for a result that is exact with no extra
-bookkeeping. On this benchmark the pairwise candidates with a first-feasible
-choice already reach the same reductions (a control run confirms `ccz_complete_6`
-still drops 20 -> 12 and `s_empty` still collapses), so the single-column
-candidates and the objective maximization are there for faithfulness, not because
-these numbers depend on them. The `0` on the sparse circuits is a property of
-those polynomials, not a search artifact.
+(`removed = 0`). The reducer follows Vandaele Algorithm 2: for each null-space
+vector it scores every candidate update `z` by how many columns the move would
+turn into duplicates (the `S(z)` hash step) and keeps that vector's best-scoring
+`z`, then applies the best move overall -- but only if it preserves the exact
+diagonal `f(x) mod 8`. That f-check is stricter than Theorem 1, which guarantees
+the signature tensor only up to a Clifford correction that may include quadratic
+terms; the check rejects any move that would need such a correction, trading some
+reductions for a result that is exact with no extra bookkeeping. The `0` on the
+sparse circuits is a property of those polynomials -- no residual cubic redundancy
+once same-parity folding is applied -- not a search artifact.
 
 Hadamard-bearing circuits become mixed-type, and Phase B leaves them to folding.
 A Toffoli is `H; CCZ; H`; once the front end absorbs the Hadamards into `U_C`, the
