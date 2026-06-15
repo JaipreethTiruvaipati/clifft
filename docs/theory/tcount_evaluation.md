@@ -21,8 +21,8 @@ configurations, isolating each optimization phase:
 * `+TOHPE`: peephole, then the full pass (Phase B TOHPE multi-axis reduction,
   Vandaele arXiv:2407.08695).
 
-Circuits are Clifford+T text. The parser has no CCX/CCZ, so Toffoli and CCZ are
-hand-decomposed; CCZ stays Z-diagonal (its 7-term phase polynomial), while a
+Circuits are Clifford+T text; the bench's generators expand CCZ and Toffoli into
+explicit Clifford+T. CCZ stays Z-diagonal (its 7-term phase polynomial), while a
 Toffoli's internal Hadamards make its block mixed-type after Clifford absorption.
 `cultivation_d5` is the real distance-5 magic-state cultivation fixture shipped
 with the repo. The bench checks equivalence by comparing the peephole'd circuit

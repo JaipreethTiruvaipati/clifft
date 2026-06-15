@@ -16,7 +16,7 @@ TestTohpe, where s_empty collapses to 0 T.
 import numpy as np
 import pytest
 from conftest import (
-    assert_statevectors_equal,
+    assert_statevectors_equiv,
     random_clifford_t_circuit,
     random_dense_clifford_t_circuit,
 )
@@ -60,21 +60,21 @@ class TestStatevectorEquivalence:
         circuit = random_clifford_t_circuit(num_qubits, depth=20, seed=seed)
         base = _statevector(clifft.compile(circuit, hir_passes=None, bytecode_passes=None))
         opt = _statevector(_phasepoly_only(circuit))
-        assert_statevectors_equal(opt, base, msg=f"{num_qubits}q seed={seed}")
+        assert_statevectors_equiv(opt, base, msg=f"{num_qubits}q seed={seed}")
 
     @pytest.mark.parametrize("seed", range(8))
     def test_random_8q_depth30(self, seed: int) -> None:
         circuit = random_clifford_t_circuit(8, depth=30, seed=seed)
         base = _statevector(clifft.compile(circuit, hir_passes=None, bytecode_passes=None))
         opt = _statevector(_phasepoly_only(circuit))
-        assert_statevectors_equal(opt, base, msg=f"8q seed={seed}")
+        assert_statevectors_equiv(opt, base, msg=f"8q seed={seed}")
 
     @pytest.mark.parametrize("seed", range(5))
     def test_dense_entangled(self, seed: int) -> None:
         circuit = random_dense_clifford_t_circuit(5, depth=40, seed=seed)
         base = _statevector(clifft.compile(circuit, hir_passes=None, bytecode_passes=None))
         opt = _statevector(_phasepoly_only(circuit))
-        assert_statevectors_equal(opt, base, msg=f"dense 5q seed={seed}")
+        assert_statevectors_equiv(opt, base, msg=f"dense 5q seed={seed}")
 
 
 # ---------------------------------------------------------------------------
@@ -243,11 +243,11 @@ class TestPassInDefaultPipeline:
         circuit = random_clifford_t_circuit(num_qubits, depth=30, seed=seed)
         base = _statevector(clifft.compile(circuit))  # default passes
         opt = _statevector(self._with_pass(circuit))
-        assert_statevectors_equal(opt, base, msg=f"{num_qubits}q seed={seed}")
+        assert_statevectors_equiv(opt, base, msg=f"{num_qubits}q seed={seed}")
 
     @pytest.mark.parametrize("seed", range(5))
     def test_dense_entangled_matches_default(self, seed: int) -> None:
         circuit = random_dense_clifford_t_circuit(5, depth=40, seed=seed)
         base = _statevector(clifft.compile(circuit))
         opt = _statevector(self._with_pass(circuit))
-        assert_statevectors_equal(opt, base, msg=f"dense 5q seed={seed}")
+        assert_statevectors_equiv(opt, base, msg=f"dense 5q seed={seed}")
