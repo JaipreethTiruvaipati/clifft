@@ -413,12 +413,12 @@ std::vector<double> record_probabilities(const CompiledModule& program,
 /// into a dense 2^n statevector for validation.
 /// Capped at n <= 10 qubits (8 MB unitary matrix) to prevent OOM.
 ///
-/// For programs without measurements or noise the result is exact,
-/// including its global phase, independent of compilation passes. After
-/// measurements or noise the state is exact only up to a global phase
-/// (which a collapsed state does not physically carry): relative
-/// amplitudes and all probabilities remain exact, but the overall phase
-/// may differ between compilations of the same circuit.
+/// For unitary programs, compilation preserves the API-visible global phase
+/// across optimization passes. Retained final-tableau expansion uses Stim's
+/// complex<float> unitary path, so those amplitudes have float-scale
+/// precision. After measurements or noise, only relative amplitudes and
+/// probabilities are meaningful; overall phase may differ between
+/// compilations.
 std::vector<std::complex<double>> get_statevector(const CompiledModule& program,
                                                   const SchrodingerState& state);
 
