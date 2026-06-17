@@ -22,12 +22,14 @@ cmake --build build --target bench_tcount && ./build/tests/bench_tcount
   maintained incrementally. A move is accepted only if it preserves the exact
   `f(x) mod 8`, which is stricter than Theorem 1; statevector-equivalence tests
   check amplitudes including global phase.
-* **What the evidence shows.** It reduces on dense diagonal structure
-  (`ccz_complete_6` 20 -> 12, up to `ccz_complete_14` 364 -> 216; `s_empty`
-  15 -> 0) and matches peephole on sparse, arithmetic, random, and the real
-  `cultivation_d5` circuits. Runtime spans ~35 ms (`ccz_complete_7`) to ~80 s
-  (364-wide blocks). Worth productionizing for diagonal-heavy workloads; opt-in
-  elsewhere.
+* **What the evidence shows.** It reduces on synthetic dense-diagonal structure
+  built to carry the cubic redundancy TOHPE targets (`ccz_complete_6` 20 -> 12,
+  up to `ccz_complete_14` 364 -> 216; `s_empty` 15 -> 0), all exact. It matches
+  peephole on sparse, arithmetic, random, and the real `cultivation_d5` fixture, a
+  clean null and the expected ancilla-free boundary. Runtime spans ~35 ms
+  (`ccz_complete_7`) to ~80 s (364-wide blocks). The prototype shows the reduction
+  works and stays exact on the structure it targets; real-world value on the
+  standard op-T-mize corpus is the documented follow-up.
 
 ## Method
 
