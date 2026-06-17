@@ -9,6 +9,26 @@ theory and citations are in [tcount.md](tcount.md). All numbers below come from
 cmake --build build --target bench_tcount && ./build/tests/bench_tcount
 ```
 
+## Summary
+
+* **What it is.** `TCountPhasePolyPass` (opt-in, `default_enabled = false`)
+  reduces T-count on maximal commuting `T_GATE` blocks. Phase A folds same-axis
+  coefficients mod 8 and matches what `PeepholeFusionPass` already reaches; Phase
+  B runs TOHPE multi-axis reduction (Vandaele Algorithm 2) on single-Pauli-type
+  blocks and leaves mixed-X/Z blocks to folding. It expects peephole before and
+  after, and emits its Clifford remainder as `PHASE_ROTATION`s.
+* **Why it is correct.** Phase B implements Algorithm 2's `S(z)` scoring, with one
+  deviation from the reference: the null space is recomputed each step rather than
+  maintained incrementally. A move is accepted only if it preserves the exact
+  `f(x) mod 8`, which is stricter than Theorem 1; statevector-equivalence tests
+  check amplitudes including global phase.
+* **What the evidence shows.** It reduces on dense diagonal structure
+  (`ccz_complete_6` 20 -> 12, up to `ccz_complete_14` 364 -> 216; `s_empty`
+  15 -> 0) and matches peephole on sparse, arithmetic, random, and the real
+  `cultivation_d5` circuits. Runtime spans ~35 ms (`ccz_complete_7`) to ~80 s
+  (364-wide blocks). Worth productionizing for diagonal-heavy workloads; opt-in
+  elsewhere.
+
 ## Method
 
 For each circuit we trace to HIR and measure the T-count under four
