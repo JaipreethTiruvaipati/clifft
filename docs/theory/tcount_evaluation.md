@@ -22,8 +22,8 @@ cmake --build build --target bench_tcount && ./build/tests/bench_tcount
   maintained incrementally. A move is accepted only if it preserves the exact
   `f(x) mod 8`, which is stricter than Theorem 1; statevector-equivalence tests
   check amplitudes including global phase.
-* **What the evidence shows.** It reduces on synthetic dense-diagonal structure
-  built to carry the cubic redundancy TOHPE targets (`ccz_complete_6` 20 -> 12,
+* **What the evidence shows.** It reduces on constructed dense-diagonal circuits
+  that carry the cubic redundancy TOHPE targets (`ccz_complete_6` 20 -> 12,
   up to `ccz_complete_14` 364 -> 216; `s_empty` 15 -> 0), all exact. It matches
   peephole on sparse, arithmetic, random, and the real `cultivation_d5` fixture, a
   clean null and the expected ancilla-free boundary. Runtime spans ~35 ms
